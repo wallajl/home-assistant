@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY=:1
+export HOME=/data/home
+
+PROFILE_DIR=/data/chromium
+NOVNC_ROOT=/usr/share/novnc
+OPTIONS_FILE=/data/options.json
+DEFAULT_URL=https://discord.com/app
+
+mkdir -p "${HOME}" "${PROFILE_DIR}"
+
+if [[ -f "${OPTIONS_FILE}" ]]; then
+    DISCORD_URL="$(jq -r '.discord_url // empty' "${OPTIONS_FILE}")"
+fi
+
+DISCORD_URL="${DISCORD_URL:-${DEFAULT_URL}}"
+
+write_novnc_landing_page() {
+    cat > "${NOVNC_ROOT}/index.html" <<'HTML'
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Discord</title>
+  </head>
+  <body>
+    <a id="open" href="vnc.html">Open Discord</a>
+    <script>
+      const pathname = window.location.pathname;
+      const base = pathname.endsWith("/") ? pathname : pathname.replace(/\/[^/]*$/, "/");
+      const wsPath = `${base.replace(/^\/+/, "")}websockify`;
+      const params = new URLSearchParams({
+        autoconnect: "1",
+        resize: "remote",
+        reconnect: "1",
+        quality: "9",
+        compression: "0",
+        path: wsPath,
+      });
+      const target = `${base}vnc.html?${params.toString()}`;
+      document.getElementById("open").href = target;
+      window.location.replace(target);
+    </script>
+  </body>
+</html>
+HTML
+}
+
+if [[ "$(id -u)" == "0" ]]; then
+    write_novnc_landing_page
+    mkdir -p /tmp/.X11-unix
+    chmod 1777 /tmp/.X11-unix
+    chown -R discord:discord /data
+    exec runuser -u discord -- env DISCORD_GUI_AS_USER=1 /usr/local/bin/discord-chat-gui
+fi
+
+Xtigervnc "${DISPLAY}" \
+    -geometry 1280x720 \
+    -depth 24 \
+    -rfbport 5900 \
+    -localhost yes \
+    -SecurityTypes None &
+VNC_PID=$!
+
+openbox &
+OPENBOX_PID=$!
+
+dbus-run-session -- chromium \
+    --no-sandbox \
+    --test-type \
+    --disable-dev-shm-usage \
+    --disable-gpu \
+    --no-first-run \
+    --no-default-browser-check \
+    --start-maximized \
+    --password-store=basic \
+    --user-data-dir="${PROFILE_DIR}" \
+    --window-size=1280,720 \
+    --app="${DISCORD_URL}" &
+CHROMIUM_PID=$!
+
+resize_browser_loop() {
+    while sleep 2; do
+        while read -r window_id; do
+            [[ -n "${window_id}" ]] || continue
+            xdotool windowmove "${window_id}" 0 0 windowsize "${window_id}" 100% 100% 2>/dev/null || true
+        done < <(xdotool search --onlyvisible --class chromium 2>/dev/null || true)
+    done
+}
+
+resize_browser_loop &
+RESIZE_LOOP_PID=$!
+
+cleanup() {
+    kill "${CHROMIUM_PID}" "${RESIZE_LOOP_PID}" "${OPENBOX_PID}" "${VNC_PID}" 2>/dev/null || true
+}
+
+trap cleanup EXIT INT TERM
+
+exec websockify --web="${NOVNC_ROOT}" 8099 localhost:5900

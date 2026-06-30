@@ -12,6 +12,7 @@ https://github.com/wallajl/home-assistant
 
 ## Add-ons
 
+- Discord Chat GUI
 - Telegram Chat GUI
 
 ## Integrations
