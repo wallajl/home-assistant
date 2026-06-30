@@ -1,5 +1,5 @@
 name: Telegram Chat GUI
-version: "0.1.0"
+version: "0.1.1"
 slug: telegram_chat_gui
 description: Telegram Web client in the Home Assistant sidebar
 url: https://github.com/wallajl/home-assistant/tree/main/addons/telegram-chat-gui
@@ -11,7 +11,7 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 8099
-panel_icon: mdi:telegram
+panel_icon: mdi:message-text-outline
 panel_title: Telegram
 ports: {}
 ports_description: {}
