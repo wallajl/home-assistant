@@ -6,6 +6,7 @@ SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         chromium \
+        chromium-sandbox \
         dbus-x11 \
         jq \
         novnc \
@@ -15,7 +16,9 @@ RUN apt-get update \
         x11vnc \
         xvfb \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd -r telegram \
+    && useradd -r -g telegram -d /data/home -s /bin/bash telegram
 
 COPY rootfs /
 

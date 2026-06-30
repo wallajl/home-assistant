@@ -17,7 +17,8 @@ fi
 
 TELEGRAM_URL="${TELEGRAM_URL:-${DEFAULT_URL}}"
 
-cat > "${NOVNC_ROOT}/index.html" <<'HTML'
+write_novnc_landing_page() {
+    cat > "${NOVNC_ROOT}/index.html" <<'HTML'
 <!doctype html>
 <html>
   <head>
@@ -32,8 +33,10 @@ cat > "${NOVNC_ROOT}/index.html" <<'HTML'
       const wsPath = `${base.replace(/^\/+/, "")}websockify`;
       const params = new URLSearchParams({
         autoconnect: "1",
-        resize: "remote",
+        resize: "off",
         reconnect: "1",
+        quality: "9",
+        compression: "0",
         path: wsPath,
       });
       const target = `${base}vnc.html?${params.toString()}`;
@@ -43,8 +46,17 @@ cat > "${NOVNC_ROOT}/index.html" <<'HTML'
   </body>
 </html>
 HTML
+}
 
-Xvfb "${DISPLAY}" -screen 0 1365x768x24 -nolisten tcp &
+if [[ "$(id -u)" == "0" ]]; then
+    write_novnc_landing_page
+    mkdir -p /tmp/.X11-unix
+    chmod 1777 /tmp/.X11-unix
+    chown -R telegram:telegram /data
+    exec runuser -u telegram -- env TELEGRAM_GUI_AS_USER=1 /usr/local/bin/telegram-chat-gui
+fi
+
+Xvfb "${DISPLAY}" -screen 0 1600x900x24 -nolisten tcp &
 XVFB_PID=$!
 
 openbox &
@@ -52,13 +64,14 @@ OPENBOX_PID=$!
 
 dbus-run-session -- chromium \
     --no-sandbox \
+    --test-type \
     --disable-dev-shm-usage \
     --disable-gpu \
     --no-first-run \
     --no-default-browser-check \
     --password-store=basic \
     --user-data-dir="${PROFILE_DIR}" \
-    --window-size=1365,768 \
+    --window-size=1600,900 \
     --app="${TELEGRAM_URL}" &
 CHROMIUM_PID=$!
 
