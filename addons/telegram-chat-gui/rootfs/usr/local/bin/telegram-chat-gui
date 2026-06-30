@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+export DISPLAY=:1
+export HOME=/data/home
+
+PROFILE_DIR=/data/chromium
+NOVNC_ROOT=/usr/share/novnc
+OPTIONS_FILE=/data/options.json
+DEFAULT_URL=https://web.telegram.org/k/
+
+mkdir -p "${HOME}" "${PROFILE_DIR}"
+
+if [[ -f "${OPTIONS_FILE}" ]]; then
+    TELEGRAM_URL="$(jq -r '.telegram_url // empty' "${OPTIONS_FILE}")"
+fi
+
+TELEGRAM_URL="${TELEGRAM_URL:-${DEFAULT_URL}}"
+
+cat > "${NOVNC_ROOT}/index.html" <<'HTML'
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="refresh" content="0; url=vnc.html?autoconnect=1&resize=remote&reconnect=1">
+    <title>Telegram</title>
+  </head>
+  <body>
+    <a href="vnc.html?autoconnect=1&resize=remote&reconnect=1">Open Telegram</a>
+  </body>
+</html>
+HTML
+
+Xvfb "${DISPLAY}" -screen 0 1365x768x24 -nolisten tcp &
+XVFB_PID=$!
+
+openbox &
+OPENBOX_PID=$!
+
+dbus-run-session -- chromium \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --disable-gpu \
+    --no-first-run \
+    --no-default-browser-check \
+    --password-store=basic \
+    --user-data-dir="${PROFILE_DIR}" \
+    --window-size=1365,768 \
+    --app="${TELEGRAM_URL}" &
+CHROMIUM_PID=$!
+
+x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -quiet &
+X11VNC_PID=$!
+
+cleanup() {
+    kill "${CHROMIUM_PID}" "${X11VNC_PID}" "${OPENBOX_PID}" "${XVFB_PID}" 2>/dev/null || true
+}
+
+trap cleanup EXIT INT TERM
+
+exec websockify --web="${NOVNC_ROOT}" 8099 localhost:5900
