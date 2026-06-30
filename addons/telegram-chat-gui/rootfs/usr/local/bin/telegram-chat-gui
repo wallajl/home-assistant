@@ -33,7 +33,7 @@ write_novnc_landing_page() {
       const wsPath = `${base.replace(/^\/+/, "")}websockify`;
       const params = new URLSearchParams({
         autoconnect: "1",
-        resize: "off",
+        resize: "remote",
         reconnect: "1",
         quality: "9",
         compression: "0",
@@ -56,7 +56,7 @@ if [[ "$(id -u)" == "0" ]]; then
     exec runuser -u telegram -- env TELEGRAM_GUI_AS_USER=1 /usr/local/bin/telegram-chat-gui
 fi
 
-Xvfb "${DISPLAY}" -screen 0 1600x900x24 -nolisten tcp &
+Xvfb "${DISPLAY}" -screen 0 1280x720x24 -nolisten tcp +extension RANDR &
 XVFB_PID=$!
 
 openbox &
@@ -71,11 +71,11 @@ dbus-run-session -- chromium \
     --no-default-browser-check \
     --password-store=basic \
     --user-data-dir="${PROFILE_DIR}" \
-    --window-size=1600,900 \
+    --window-size=1280,720 \
     --app="${TELEGRAM_URL}" &
 CHROMIUM_PID=$!
 
-x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -quiet &
+x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -xrandr resize -quiet &
 X11VNC_PID=$!
 
 cleanup() {
