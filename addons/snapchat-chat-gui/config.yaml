@@ -1,0 +1,21 @@
+name: Snapchat Chat GUI
+version: "0.1.0"
+slug: snapchat_chat_gui
+description: Snapchat Web client in the Home Assistant sidebar
+url: https://github.com/wallajl/home-assistant/tree/main/addons/snapchat-chat-gui
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:message-text-outline
+panel_title: Snapchat
+ports: {}
+ports_description: {}
+options:
+  snapchat_url: https://web.snapchat.com/
+schema:
+  snapchat_url: str
