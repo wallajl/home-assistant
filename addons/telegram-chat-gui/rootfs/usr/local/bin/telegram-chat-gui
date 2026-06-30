@@ -56,8 +56,13 @@ if [[ "$(id -u)" == "0" ]]; then
     exec runuser -u telegram -- env TELEGRAM_GUI_AS_USER=1 /usr/local/bin/telegram-chat-gui
 fi
 
-Xvfb "${DISPLAY}" -screen 0 1280x720x24 -nolisten tcp +extension RANDR &
-XVFB_PID=$!
+Xtigervnc "${DISPLAY}" \
+    -geometry 1280x720 \
+    -depth 24 \
+    -rfbport 5900 \
+    -localhost yes \
+    -SecurityTypes None &
+VNC_PID=$!
 
 openbox &
 OPENBOX_PID=$!
@@ -69,17 +74,27 @@ dbus-run-session -- chromium \
     --disable-gpu \
     --no-first-run \
     --no-default-browser-check \
+    --start-maximized \
     --password-store=basic \
     --user-data-dir="${PROFILE_DIR}" \
     --window-size=1280,720 \
     --app="${TELEGRAM_URL}" &
 CHROMIUM_PID=$!
 
-x11vnc -display "${DISPLAY}" -forever -shared -nopw -rfbport 5900 -xrandr resize -quiet &
-X11VNC_PID=$!
+resize_browser_loop() {
+    while sleep 2; do
+        while read -r window_id; do
+            [[ -n "${window_id}" ]] || continue
+            xdotool windowmove "${window_id}" 0 0 windowsize "${window_id}" 100% 100% 2>/dev/null || true
+        done < <(xdotool search --onlyvisible --class chromium 2>/dev/null || true)
+    done
+}
+
+resize_browser_loop &
+RESIZE_LOOP_PID=$!
 
 cleanup() {
-    kill "${CHROMIUM_PID}" "${X11VNC_PID}" "${OPENBOX_PID}" "${XVFB_PID}" 2>/dev/null || true
+    kill "${CHROMIUM_PID}" "${RESIZE_LOOP_PID}" "${OPENBOX_PID}" "${VNC_PID}" 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM
