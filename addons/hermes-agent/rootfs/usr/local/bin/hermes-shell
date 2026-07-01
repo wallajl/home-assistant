@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "${HERMES_HOME:-/data/hermes}"
+
+cat <<'TEXT'
+Hermes Agent add-on terminal
+
+Useful commands:
+  hermes setup --portal
+  hermes setup
+  hermes setup gateway
+  hermes model
+  hermes --tui
+  hermes gateway status
+
+State is stored in /data/hermes on the Home Assistant host.
+
+TEXT
+
+exec bash -l

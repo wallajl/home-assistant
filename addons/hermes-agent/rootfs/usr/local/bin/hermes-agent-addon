@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPTIONS_FILE=/data/options.json
+DATA_DIR=/data/hermes
+TERMINAL_PORT=8099
+S6_SETUIDGID=/command/s6-setuidgid
+
+mkdir -p "${DATA_DIR}"
+
+chown -R hermes:hermes "${DATA_DIR}"
+
+export HOME="${DATA_DIR}"
+export HERMES_HOME="${DATA_DIR}"
+export HERMES_WRITE_SAFE_ROOT="${DATA_DIR}"
+export HERMES_LAZY_INSTALL_TARGET="${DATA_DIR}/lazy-packages"
+
+read_option() {
+    local key="$1"
+    local default="$2"
+
+    if [[ -f "${OPTIONS_FILE}" ]]; then
+        jq -r --arg key "${key}" --arg default "${default}" '.[$key] // $default' "${OPTIONS_FILE}"
+    else
+        printf '%s\n' "${default}"
+    fi
+}
+
+set_env_value() {
+    local key="$1"
+    local value="$2"
+    local env_file="${DATA_DIR}/.env"
+
+    [[ -n "${value}" ]] || return 0
+
+    touch "${env_file}"
+    chown hermes:hermes "${env_file}"
+    chmod 600 "${env_file}"
+
+    python3 - "${env_file}" "${key}" "${value}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+key = sys.argv[2]
+value = sys.argv[3]
+line = f"{key}={value}"
+
+lines = path.read_text().splitlines() if path.exists() else []
+for index, existing in enumerate(lines):
+    if existing.startswith(f"{key}="):
+        lines[index] = line
+        break
+else:
+    lines.append(line)
+
+path.write_text("\n".join(lines) + "\n")
+PY
+}
+
+START_GATEWAY="$(read_option start_gateway true)"
+GATEWAY_ALLOW_ALL_USERS="$(read_option gateway_allow_all_users false)"
+HASS_URL="$(read_option hass_url 'http://homeassistant.local:8123')"
+HASS_TOKEN="$(read_option hass_token '')"
+TELEGRAM_BOT_TOKEN="$(read_option telegram_bot_token '')"
+TELEGRAM_ALLOWED_USERS="$(read_option telegram_allowed_users '')"
+
+set_env_value HASS_URL "${HASS_URL}"
+set_env_value HASS_TOKEN "${HASS_TOKEN}"
+set_env_value TELEGRAM_BOT_TOKEN "${TELEGRAM_BOT_TOKEN}"
+set_env_value TELEGRAM_ALLOWED_USERS "${TELEGRAM_ALLOWED_USERS}"
+set_env_value GATEWAY_ALLOW_ALL_USERS "${GATEWAY_ALLOW_ALL_USERS}"
+
+cleanup() {
+    if [[ -n "${GATEWAY_PID:-}" ]]; then
+        kill "${GATEWAY_PID}" 2>/dev/null || true
+    fi
+    if [[ -n "${TTYD_PID:-}" ]]; then
+        kill "${TTYD_PID}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+if [[ "${START_GATEWAY}" == "true" ]]; then
+    "${S6_SETUIDGID}" hermes hermes gateway run --no-supervise --accept-hooks &
+    GATEWAY_PID=$!
+fi
+
+"${S6_SETUIDGID}" hermes ttyd \
+    --writable \
+    --port "${TERMINAL_PORT}" \
+    --interface 0.0.0.0 \
+    --terminal-type xterm-256color \
+    /usr/local/bin/hermes-shell &
+TTYD_PID=$!
+
+if [[ -n "${GATEWAY_PID:-}" ]]; then
+    wait -n "${GATEWAY_PID}" "${TTYD_PID}"
+else
+    wait -n "${TTYD_PID}"
+fi
