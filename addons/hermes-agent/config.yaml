@@ -9,7 +9,6 @@ arch:
 startup: services
 boot: auto
 init: false
-host_network: true
 ingress: true
 ingress_port: 8099
 panel_icon: mdi:message-processing-outline
@@ -20,7 +19,7 @@ map:
   - media:rw
   - ssl:ro
 options:
-  start_gateway: true
+  start_gateway: false
   gateway_allow_all_users: false
   hass_url: http://homeassistant.local:8123
   hass_token: ""
