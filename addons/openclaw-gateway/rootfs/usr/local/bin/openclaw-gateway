@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPTIONS_FILE=/data/options.json
+STATE_DIR=/data/openclaw
+TERMINAL_PORT=8099
+
+mkdir -p "${STATE_DIR}"
+
+read_option() {
+    local key="$1"
+    local default="$2"
+
+    if [[ -f "${OPTIONS_FILE}" ]]; then
+        jq -r --arg key "${key}" --arg default "${default}" '.[$key] // $default' "${OPTIONS_FILE}"
+    else
+        printf '%s\n' "${default}"
+    fi
+}
+
+GATEWAY_PORT="$(read_option gateway_port 18789)"
+GATEWAY_BIND="$(read_option gateway_bind loopback)"
+GATEWAY_AUTH="$(read_option gateway_auth none)"
+GATEWAY_TOKEN="$(read_option gateway_token '')"
+GATEWAY_PASSWORD="$(read_option gateway_password '')"
+WORKSPACE_DIR="$(read_option workspace_dir /share/openclaw-workspace)"
+
+export HOME="${STATE_DIR}"
+export OPENCLAW_STATE_DIR="${STATE_DIR}"
+export OPENCLAW_CONFIG_PATH="${STATE_DIR}/openclaw.json"
+export OPENCLAW_WORKSPACE="${WORKSPACE_DIR}"
+
+mkdir -p "${WORKSPACE_DIR}"
+
+if [[ ! -f "${OPENCLAW_CONFIG_PATH}" ]]; then
+    ONBOARD_COMMAND=(
+        openclaw
+        onboard
+        --non-interactive
+        --accept-risk
+        --mode local
+        --flow manual
+        --auth-choice skip
+        --workspace "${WORKSPACE_DIR}"
+        --gateway-bind "${GATEWAY_BIND}"
+        --gateway-port "${GATEWAY_PORT}"
+        --skip-channels
+        --skip-daemon
+        --skip-health
+        --skip-ui
+    )
+
+    case "${GATEWAY_AUTH}" in
+        token)
+            ONBOARD_COMMAND+=(--gateway-auth token --gateway-token "${GATEWAY_TOKEN}")
+            ;;
+        password)
+            ONBOARD_COMMAND+=(--gateway-auth password --gateway-password "${GATEWAY_PASSWORD}")
+            ;;
+    esac
+
+    "${ONBOARD_COMMAND[@]}"
+fi
+
+GATEWAY_COMMAND=(
+    openclaw
+    gateway
+    run
+    --allow-unconfigured
+    --bind "${GATEWAY_BIND}"
+    --port "${GATEWAY_PORT}"
+    --auth "${GATEWAY_AUTH}"
+)
+
+case "${GATEWAY_AUTH}" in
+    token)
+        if [[ -z "${GATEWAY_TOKEN}" ]]; then
+            echo "gateway_auth is token, but gateway_token is empty."
+            exit 1
+        fi
+        GATEWAY_COMMAND+=(--token "${GATEWAY_TOKEN}")
+        ;;
+    password)
+        if [[ -z "${GATEWAY_PASSWORD}" ]]; then
+            echo "gateway_auth is password, but gateway_password is empty."
+            exit 1
+        fi
+        GATEWAY_COMMAND+=(--password "${GATEWAY_PASSWORD}")
+        ;;
+esac
+
+"${GATEWAY_COMMAND[@]}" &
+GATEWAY_PID=$!
+
+cleanup() {
+    kill "${GATEWAY_PID}" 2>/dev/null || true
+    if [[ -n "${TTYD_PID:-}" ]]; then
+        kill "${TTYD_PID}" 2>/dev/null || true
+    fi
+}
+
+trap cleanup EXIT INT TERM
+
+sleep 8
+if ! kill -0 "${GATEWAY_PID}" 2>/dev/null; then
+    echo "OpenClaw Gateway exited during startup."
+    wait "${GATEWAY_PID}" || true
+    exit 1
+fi
+
+ttyd \
+    --writable \
+    --port "${TERMINAL_PORT}" \
+    --interface 0.0.0.0 \
+    --terminal-type xterm-256color \
+    /usr/local/bin/openclaw-shell &
+TTYD_PID=$!
+
+wait -n "${GATEWAY_PID}" "${TTYD_PID}"

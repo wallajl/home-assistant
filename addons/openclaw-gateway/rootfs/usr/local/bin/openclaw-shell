@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "${OPENCLAW_WORKSPACE:-/share/openclaw-workspace}"
+
+cat <<'TEXT'
+OpenClaw Gateway add-on terminal
+
+Useful commands:
+  openclaw status
+  openclaw configure
+  openclaw channels add --channel telegram
+  openclaw models auth login
+  openclaw tui --local
+
+State is stored in /data/openclaw.
+Workspace is stored in the configured workspace_dir.
+
+TEXT
+
+exec bash -l

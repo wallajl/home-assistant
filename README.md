@@ -13,6 +13,8 @@ https://github.com/wallajl/home-assistant
 ## Add-ons
 
 - Discord Chat GUI
+- OpenClaw Gateway
+- OpenClaw Node
 - Snapchat Chat GUI
 - Telegram Chat GUI
 

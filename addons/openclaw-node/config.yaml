@@ -1,0 +1,31 @@
+name: OpenClaw Node
+version: "0.1.0"
+slug: openclaw_node
+description: OpenClaw headless node host running inside Home Assistant
+url: https://github.com/wallajl/home-assistant/tree/main/addons/openclaw-node
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+host_network: true
+map:
+  - config:rw
+  - share:rw
+  - media:rw
+  - ssl:ro
+options:
+  gateway_host: ""
+  gateway_port: 18789
+  tls: false
+  tls_fingerprint: ""
+  display_name: Home Assistant
+  node_id: ""
+schema:
+  gateway_host: str
+  gateway_port: int
+  tls: bool
+  tls_fingerprint: str?
+  display_name: str
+  node_id: str?

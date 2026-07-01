@@ -1,0 +1,35 @@
+name: OpenClaw Gateway
+version: "0.1.0"
+slug: openclaw_gateway
+description: Full OpenClaw gateway with browser terminal access
+url: https://github.com/wallajl/home-assistant/tree/main/addons/openclaw-gateway
+arch:
+  - amd64
+  - aarch64
+startup: services
+boot: auto
+init: false
+host_network: true
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:robot-outline
+panel_title: OpenClaw
+map:
+  - config:rw
+  - share:rw
+  - media:rw
+  - ssl:ro
+options:
+  gateway_port: 18789
+  gateway_bind: loopback
+  gateway_auth: none
+  gateway_token: ""
+  gateway_password: ""
+  workspace_dir: /share/openclaw-workspace
+schema:
+  gateway_port: int
+  gateway_bind: list(loopback|lan|tailnet|auto)
+  gateway_auth: list(none|token|password)
+  gateway_token: password?
+  gateway_password: password?
+  workspace_dir: str

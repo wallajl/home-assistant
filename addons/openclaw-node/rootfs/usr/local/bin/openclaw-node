@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+OPTIONS_FILE=/data/options.json
+STATE_DIR=/data/openclaw
+
+mkdir -p "${STATE_DIR}"
+
+read_option() {
+    local key="$1"
+    local default="$2"
+
+    if [[ -f "${OPTIONS_FILE}" ]]; then
+        jq -r --arg key "${key}" --arg default "${default}" '.[$key] // $default' "${OPTIONS_FILE}"
+    else
+        printf '%s\n' "${default}"
+    fi
+}
+
+GATEWAY_HOST="$(read_option gateway_host '')"
+GATEWAY_PORT="$(read_option gateway_port 18789)"
+TLS="$(read_option tls false)"
+TLS_FINGERPRINT="$(read_option tls_fingerprint '')"
+DISPLAY_NAME="$(read_option display_name 'Home Assistant')"
+NODE_ID="$(read_option node_id '')"
+
+if [[ -z "${GATEWAY_HOST}" ]]; then
+    echo "OpenClaw Node add-on is not configured yet."
+    echo "Set gateway_host to the OpenClaw Gateway host or IP address, then restart the add-on."
+    exit 1
+fi
+
+COMMAND=(
+    openclaw
+    node
+    run
+    --host "${GATEWAY_HOST}"
+    --port "${GATEWAY_PORT}"
+    --display-name "${DISPLAY_NAME}"
+)
+
+if [[ "${TLS}" == "true" ]]; then
+    COMMAND+=(--tls)
+fi
+
+if [[ -n "${TLS_FINGERPRINT}" ]]; then
+    COMMAND+=(--tls-fingerprint "${TLS_FINGERPRINT}")
+fi
+
+if [[ -n "${NODE_ID}" ]]; then
+    COMMAND+=(--node-id "${NODE_ID}")
+fi
+
+export HOME="${STATE_DIR}"
+export OPENCLAW_STATE_DIR="${STATE_DIR}"
+
+exec "${COMMAND[@]}"
