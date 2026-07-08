@@ -12,10 +12,10 @@ PROVIDER_CONFIG_JSON="$(bashio::config 'provider_config_json')"
 export CODEXBAR_HOME=/config
 export XDG_CONFIG_HOME=/config/xdg
 export CODEXBAR_CONFIG=/config/codexbar/config.json
-export HOME=/config/home
+export HOME=/config
 
-mkdir -p /config/codexbar /config/xdg/codexbar /config/home /config/.codex /config/.claude
-chmod 700 /config/codexbar /config/home /config/.codex /config/.claude || true
+mkdir -p /config/codexbar /config/xdg/codexbar /config/.codex /config/.claude
+chmod 700 /config/codexbar /config/.codex /config/.claude || true
 
 if [[ ! -x /usr/local/bin/codexbar || ! -f /usr/local/share/codexbar/VERSION || "$(cat /usr/local/share/codexbar/VERSION)" != "${VERSION}" ]]; then
     bashio::log.info "Installing CodexBar CLI ${VERSION} for ${BUILD_ARCH:-unknown arch}"

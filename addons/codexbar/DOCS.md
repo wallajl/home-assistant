@@ -26,12 +26,21 @@ Before overwriting an existing config, the setup API creates a timestamped backu
 
 ## Local CLI credentials
 
-Some CodexBar providers are easiest when their CLI auth files are present inside the add-on container:
+Codex and Claude OAuth are not configured with normal API keys. CodexBar reads the OAuth files created by the normal CLI login flows.
+
+On a computer where you are already logged in:
+
+- Codex OAuth file: `~/.codex/auth.json`
+- Claude OAuth file: `~/.claude/.credentials.json`
+
+Copy them into the add-on configuration storage so they appear inside the add-on container as:
 
 - Codex files: `/config/.codex`
 - Claude files: `/config/.claude`
 
-Copy the relevant files into the add-on config storage, then restart the add-on.
+Then restart the add-on and use the dashboard provider source `auto` or `oauth`.
+
+If you want organization-level Claude Admin API spend instead of your Claude OAuth account limits, use an Anthropic Admin API key (`sk-ant-admin...`) in the Claude provider card. Codex does not have a useful API-key setup for ChatGPT/Codex subscription quota; use OAuth via `~/.codex/auth.json`.
 
 ## Advanced configuration
 

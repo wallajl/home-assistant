@@ -77,6 +77,12 @@
       <p class="muted">Config is written to <code id="configPath">/config/codexbar/config.json</code> with 0600 permissions. Secrets stay inside this add-on container/config storage.</p>
     </section>
 
+    <section class="card ok" style="margin-top:14px">
+      <h3>OAuth login note</h3>
+      <p>Codex and Claude subscription limits use OAuth, not normal API keys.</p>
+      <p class="muted">Run/login with the normal CLIs on a computer, then copy <code>~/.codex/auth.json</code> to <code>/config/.codex/auth.json</code> and <code>~/.claude/.credentials.json</code> to <code>/config/.claude/.credentials.json</code> in this add-on's config storage. Restart the add-on after copying.</p>
+    </section>
+
     <h2>Providers</h2>
     <section id="providerGrid" class="grid"></section>
 

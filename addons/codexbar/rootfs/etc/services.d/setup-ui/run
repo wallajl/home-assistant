@@ -1,4 +1,8 @@
 #!/usr/bin/with-contenv bashio
 set -euo pipefail
+export CODEXBAR_HOME=/config
+export XDG_CONFIG_HOME=/config/xdg
+export CODEXBAR_CONFIG=/config/codexbar/config.json
+export HOME=/config
 bashio::log.info "Starting CodexBar setup UI on :8099"
 exec python3 /usr/share/codexbar-addon/server.py

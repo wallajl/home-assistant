@@ -1,5 +1,5 @@
 name: "CodexBar"
-version: "0.2.0"
+version: "0.2.1"
 slug: "codexbar"
 description: "Home Assistant ingress setup wizard and dashboard for CodexBar AI usage and cost stats"
 url: "https://github.com/wallajl/home-assistant"
@@ -31,7 +31,7 @@ options:
   provider_config_json: "{}"
 schema:
   codexbar_version: "str"
-  default_provider: "list(all|both|codex|claude|openai|gemini|copilot|cursor|openrouter|litellm)"
+  default_provider: "list(all|both|codex|claude|openai|gemini|copilot|openrouter|litellm|llmproxy)"
   refresh_interval: "int(0,3600)"
   request_timeout: "int(0,300)"
   log_level: "list(trace|verbose|debug|info|warning|error|critical)"

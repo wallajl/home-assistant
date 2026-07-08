@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.1
+
+- Fix OAuth credential discovery inside the add-on by setting `HOME=/config`, so CodexBar can read `/config/.codex/auth.json` and `/config/.claude/.credentials.json`.
+- Sync the Home Assistant provider schema with the setup wizard provider list.
+
 ## 0.2.0
 
 - Add an Ingress setup wizard for enabling providers and saving CodexBar config from the browser.
