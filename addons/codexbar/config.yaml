@@ -1,7 +1,7 @@
 name: "CodexBar"
-version: "0.1.0"
+version: "0.2.0"
 slug: "codexbar"
-description: "Home Assistant ingress dashboard for CodexBar AI coding usage and cost stats"
+description: "Home Assistant ingress setup wizard and dashboard for CodexBar AI usage and cost stats"
 url: "https://github.com/wallajl/home-assistant"
 arch:
   - amd64

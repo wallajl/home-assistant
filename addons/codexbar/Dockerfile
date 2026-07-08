@@ -9,13 +9,13 @@ ENV BUILD_ARCH=${BUILD_ARCH}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apk add --no-cache ca-certificates curl jq nginx tar \
-    && mkdir -p /run/nginx /usr/share/codexbar-addon /etc/nginx/http.d
+RUN apk add --no-cache ca-certificates curl jq python3 tar \
+    && mkdir -p /usr/share/codexbar-addon
 
 COPY rootfs /
 
 RUN chmod a+x /etc/services.d/codexbar/run /etc/services.d/codexbar/finish \
-    && chmod a+x /etc/services.d/nginx/run /etc/services.d/nginx/finish \
+    && chmod a+x /etc/services.d/setup-ui/run /etc/services.d/setup-ui/finish \
     && chmod a+x /usr/local/bin/install-codexbar-cli \
     && /usr/local/bin/install-codexbar-cli "${CODEXBAR_VERSION}"
 

@@ -3,30 +3,46 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CodexBar</title>
+  <title>CodexBar Setup</title>
   <style>
-    :root { color-scheme: dark; --bg:#09090b; --card:#14141a; --muted:#a1a1aa; --fg:#f4f4f5; --line:#27272f; --ok:#16d3b4; --bad:#fb7185; }
+    :root { color-scheme: dark; --bg:#09090b; --card:#14141a; --soft:#1d1d27; --muted:#a1a1aa; --fg:#f4f4f5; --line:#2d2d38; --ok:#16d3b4; --warn:#f59e0b; --bad:#fb7185; --blue:#60a5fa; }
     * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at 20% 0%, #18233b 0, transparent 35%), var(--bg); color:var(--fg); }
-    main { max-width: 1120px; margin: 0 auto; padding: 28px 18px 56px; }
+    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at 15% 0%, #132544 0, transparent 34%), radial-gradient(circle at 85% 10%, #14342f 0, transparent 28%), var(--bg); color:var(--fg); }
+    main { max-width: 1180px; margin: 0 auto; padding: 28px 18px 56px; }
     header { display:flex; align-items:flex-end; justify-content:space-between; gap: 16px; margin-bottom: 22px; }
-    h1 { margin:0; font-size: clamp(30px, 6vw, 56px); letter-spacing:-0.06em; }
-    .sub { color:var(--muted); margin-top:6px; }
-    button, select { background:#1f2937; color:var(--fg); border:1px solid #334155; border-radius: 12px; padding: 10px 12px; font-weight: 650; }
-    .controls { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:14px; }
-    .card { background: color-mix(in srgb, var(--card) 92%, transparent); border:1px solid var(--line); border-radius: 22px; padding: 18px; box-shadow: 0 20px 60px #0008; }
-    .card h2 { margin:0 0 10px; font-size:20px; display:flex; align-items:center; justify-content:space-between; gap:8px; text-transform: capitalize; }
-    .pill { font-size:12px; color:#061512; background:var(--ok); border-radius:999px; padding:4px 8px; text-transform:none; }
-    .muted { color:var(--muted); }
+    h1 { margin:0; font-size: clamp(34px, 6vw, 62px); letter-spacing:-0.07em; }
+    h2 { margin: 24px 0 12px; letter-spacing:-0.03em; }
+    h3 { margin:0 0 8px; }
+    .sub, .muted { color:var(--muted); }
+    .tabs, .controls, .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    .tabs { margin: 18px 0; }
+    button, select, input, textarea { background:#111827; color:var(--fg); border:1px solid #334155; border-radius: 12px; padding: 10px 12px; font: inherit; }
+    input, textarea, select { width: 100%; }
+    textarea { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+    button { cursor:pointer; font-weight: 750; }
+    button.primary { background: linear-gradient(135deg, var(--ok), var(--blue)); color:#03110f; border:0; }
+    button.ghost { background:#15151e; }
+    button.active { outline: 2px solid var(--ok); }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px; }
+    .card { background: color-mix(in srgb, var(--card) 94%, transparent); border:1px solid var(--line); border-radius: 22px; padding: 18px; box-shadow: 0 20px 60px #0007; }
+    .provider { display:grid; gap: 12px; }
+    .provider.enabled { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
+    .provider-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .pill { font-size:12px; color:#061512; background:var(--ok); border-radius:999px; padding:4px 8px; white-space:nowrap; }
+    .warn { background: rgba(245,158,11,.13); border-color: rgba(245,158,11,.35); }
+    .error { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
+    .ok { border-color: color-mix(in srgb, var(--ok) 60%, var(--line)); }
+    .field { display:grid; gap:6px; }
+    label { color:var(--muted); font-size: 13px; }
     .bar { height: 12px; background:#27272f; border-radius:999px; overflow:hidden; margin: 8px 0 4px; }
-    .fill { height:100%; background:linear-gradient(90deg, var(--ok), #60a5fa); border-radius:inherit; }
+    .fill { height:100%; background:linear-gradient(90deg, var(--ok), var(--blue)); border-radius:inherit; }
     dl { display:grid; grid-template-columns: 1fr auto; gap: 8px 12px; margin: 12px 0 0; }
     dt { color:var(--muted); } dd { margin:0; text-align:right; font-variant-numeric: tabular-nums; }
     pre { white-space: pre-wrap; overflow:auto; max-height:420px; background:#050507; border:1px solid var(--line); border-radius:18px; padding:14px; }
-    .error { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
-    .footer { margin-top: 16px; color:var(--muted); font-size: 13px; }
-    a { color:#67e8f9; }
+    .hidden { display:none !important; }
+    .status { margin: 12px 0; }
+    .two { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:14px; }
+    @media (max-width: 760px) { header, .two { grid-template-columns: 1fr; display:grid; } }
   </style>
 </head>
 <body>
@@ -34,8 +50,46 @@
   <header>
     <div>
       <h1>CodexBar</h1>
-      <div class="sub">AI coding usage, quotas, resets and local cost snapshots inside Home Assistant.</div>
+      <div class="sub">Setup and monitor AI coding quotas from Home Assistant.</div>
     </div>
+    <div class="controls">
+      <button id="saveTop" class="primary">Save setup</button>
+      <button id="refresh" class="ghost">Refresh data</button>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="setup">Setup wizard</button>
+    <button class="tab" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="advanced">Advanced JSON</button>
+  </nav>
+
+  <section id="message" class="card status muted">Loading configuration…</section>
+
+  <section id="setupTab">
+    <section class="card warn">
+      <h3>Quick path</h3>
+      <ol>
+        <li>Enable the providers you care about below.</li>
+        <li>Paste API keys/cookies only where needed. Leave local CLI providers blank if you will copy auth files into the add-on config folder.</li>
+        <li>Press <strong>Save setup</strong>, then <strong>Test</strong> a provider.</li>
+      </ol>
+      <p class="muted">Config is written to <code id="configPath">/config/codexbar/config.json</code> with 0600 permissions. Secrets stay inside this add-on container/config storage.</p>
+    </section>
+
+    <h2>Providers</h2>
+    <section id="providerGrid" class="grid"></section>
+
+    <section class="card" style="margin-top:14px">
+      <h3>Local CLI auth files</h3>
+      <p class="muted">Codex and Claude often need local CLI credential files instead of API keys. Copy them into the add-on config storage, then restart this add-on.</p>
+      <pre>Codex files:  /config/.codex
+Claude files: /config/.claude
+CodexBar config: /config/codexbar/config.json</pre>
+    </section>
+  </section>
+
+  <section id="dashboardTab" class="hidden">
     <div class="controls">
       <select id="provider">
         <option value="all">all providers</option>
@@ -43,24 +97,121 @@
         <option value="codex">codex</option>
         <option value="claude">claude</option>
         <option value="openai">openai</option>
+        <option value="openrouter">openrouter</option>
+        <option value="litellm">litellm</option>
       </select>
-      <button id="refresh">Refresh</button>
+      <button id="refreshDash" class="ghost">Refresh dashboard</button>
     </div>
-  </header>
-  <section id="status" class="card muted">Loading…</section>
-  <h2>Usage</h2>
-  <section id="usage" class="grid"></section>
-  <h2>Cost</h2>
-  <section id="cost" class="grid"></section>
-  <div class="footer">Configure providers by editing add-on option <code>provider_config_json</code> or the persistent file <code>/addon_configs/&lt;repo&gt;_codexbar/codexbar/config.json</code>.</div>
+    <h2>Usage</h2>
+    <section id="usage" class="grid"></section>
+    <h2>Cost</h2>
+    <section id="cost" class="grid"></section>
+  </section>
+
+  <section id="advancedTab" class="hidden">
+    <div class="two">
+      <section class="card">
+        <h3>Raw CodexBar config</h3>
+        <p class="muted">For providers not shown in the wizard, edit the JSON directly. It follows CodexBar's normal config schema.</p>
+        <textarea id="rawJson" spellcheck="false"></textarea>
+        <div class="controls" style="margin-top:10px">
+          <button id="formatJson" class="ghost">Format JSON</button>
+          <button id="saveRaw" class="primary">Save JSON</button>
+          <button id="validate" class="ghost">Validate</button>
+        </div>
+      </section>
+      <section class="card">
+        <h3>Validation output</h3>
+        <pre id="validationOutput">No validation run yet.</pre>
+      </section>
+    </div>
+  </section>
 </main>
+
 <script>
 const $ = (id) => document.getElementById(id);
+let config = { version: 1, providers: [] };
+let presets = [];
+
 const fmtDate = (value) => value ? new Date(value).toLocaleString() : '—';
 const pct = (value) => Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
 const money = (value) => Number.isFinite(value) ? '$' + value.toFixed(2) : '—';
+const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 function asArray(payload) { return Array.isArray(payload) ? payload : [payload]; }
 function providerName(p) { return (p.provider || p.providerID || 'provider').replaceAll('_', ' '); }
+function providerEntry(id) { return (config.providers ||= []).find(p => p.id === id); }
+function ensureProvider(id) { let p = providerEntry(id); if (!p) { p = { id, enabled: false, source: 'auto' }; config.providers.push(p); } return p; }
+function setMessage(text, cls='muted') { $('message').className = `card status ${cls}`; $('message').innerHTML = text; }
+
+function renderProviders() {
+  $('providerGrid').innerHTML = presets.map(preset => {
+    const p = providerEntry(preset.id) || { id: preset.id, enabled: false, source: preset.defaultSource || 'auto' };
+    const fieldHtml = (preset.fields || []).map(field => {
+      const labels = { apiKey: 'API key / token', cookieHeader: 'Manual Cookie header', enterpriseHost: 'Server / Base URL', workspaceID: 'Workspace / Project ID' };
+      const type = field === 'apiKey' || field === 'cookieHeader' ? 'password' : 'text';
+      return `<div class="field"><label>${labels[field] || field}</label><input data-provider="${preset.id}" data-field="${field}" type="${type}" value="${esc(p[field] || '')}" placeholder="optional" /></div>`;
+    }).join('');
+    return `<article class="card provider ${p.enabled ? 'enabled' : ''}">
+      <div class="provider-head"><div><h3>${esc(preset.name)}</h3><div class="muted">${esc(preset.auth)}</div></div><span class="pill">${esc(preset.id)}</span></div>
+      <p class="muted">${esc(preset.help)}</p>
+      <div class="row"><label><input data-provider="${preset.id}" data-field="enabled" type="checkbox" ${p.enabled ? 'checked' : ''} style="width:auto"> Enable</label></div>
+      <div class="field"><label>Source</label><select data-provider="${preset.id}" data-field="source">
+        ${['auto','api','oauth','web','cli'].map(v => `<option value="${v}" ${((p.source || preset.defaultSource || 'auto') === v) ? 'selected' : ''}>${v}</option>`).join('')}
+      </select></div>
+      ${fieldHtml}
+      <div class="controls"><button class="ghost test-provider" data-test-provider="${preset.id}">Test ${esc(preset.name)}</button></div>
+    </article>`;
+  }).join('');
+}
+
+function syncFromForm() {
+  document.querySelectorAll('[data-provider][data-field]').forEach(el => {
+    const p = ensureProvider(el.dataset.provider);
+    const field = el.dataset.field;
+    if (field === 'enabled') p.enabled = el.checked;
+    else {
+      const value = el.value.trim();
+      if (value) p[field] = value;
+      else delete p[field];
+    }
+  });
+  config.providers = (config.providers || []).filter(p => p.id || p.enabled);
+  $('rawJson').value = JSON.stringify(config, null, 2);
+}
+
+async function loadConfig() {
+  const res = await fetch('api/config');
+  const data = await res.json();
+  config = data.config || { version: 1, providers: [] };
+  if (!Array.isArray(config.providers)) config.providers = [];
+  presets = data.presets || [];
+  $('configPath').textContent = data.path || '/config/codexbar/config.json';
+  $('rawJson').value = JSON.stringify(config, null, 2);
+  renderProviders();
+  setMessage('Setup loaded. Enable providers, save, then test.', 'ok');
+}
+
+async function saveConfig(source='form') {
+  try {
+    if (source === 'raw') config = JSON.parse($('rawJson').value);
+    else syncFromForm();
+  } catch (e) { setMessage(`JSON error: ${esc(e.message)}`, 'error'); return; }
+  const res = await fetch('api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({config}) });
+  const data = await res.json();
+  if (!res.ok || !data.ok) { setMessage(`Save failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
+  $('validationOutput').textContent = JSON.stringify(data.validation || data, null, 2);
+  setMessage(`Saved setup to ${esc(data.path)}${data.backup ? ` · backup ${esc(data.backup)}` : ''}`, 'ok');
+  await loadConfig();
+}
+
+async function validateConfig() {
+  syncFromForm();
+  const res = await fetch('api/validate');
+  const data = await res.json();
+  $('validationOutput').textContent = JSON.stringify(data, null, 2);
+  setMessage(data.ok ? 'Config structure is valid.' : `Validation failed: ${esc(data.message)}`, data.ok ? 'ok' : 'error');
+}
+
 function windowBlock(label, win) {
   if (!win) return '';
   const used = Number(win.usedPercent);
@@ -69,28 +220,27 @@ function windowBlock(label, win) {
   return `<dt>${label}</dt><dd>${Math.round(shown)}% left</dd><dt></dt><dd><div class="bar"><div class="fill" style="width:${pct(shown)}%"></div></div></dd><dt>Reset</dt><dd>${fmtDate(win.resetsAt)}</dd>`;
 }
 function usageCard(p) {
-  if (p.error) return `<article class="card error"><h2>${providerName(p)}</h2><p>${p.error.message || JSON.stringify(p.error)}</p></article>`;
+  if (p.error) return `<article class="card error"><h3>${esc(providerName(p))}</h3><p>${esc(p.error.message || JSON.stringify(p.error))}</p></article>`;
   const usage = p.usage || {};
   const identity = usage.identity || {};
-  return `<article class="card"><h2><span>${providerName(p)}</span><span class="pill">${p.source || 'source'}</span></h2><dl>
+  return `<article class="card"><h3>${esc(providerName(p))} <span class="pill">${esc(p.source || 'source')}</span></h3><dl>
     ${windowBlock('Session', usage.primary)}${windowBlock('Weekly', usage.secondary)}${windowBlock('Monthly', usage.tertiary)}
-    <dt>Account</dt><dd>${usage.accountEmail || identity.accountEmail || p.account || '—'}</dd>
+    <dt>Account</dt><dd>${esc(usage.accountEmail || identity.accountEmail || p.account || '—')}</dd>
     <dt>Updated</dt><dd>${fmtDate(usage.updatedAt || p.updatedAt)}</dd>
   </dl></article>`;
 }
 function costCard(p) {
-  if (p.error) return `<article class="card error"><h2>${providerName(p)}</h2><p>${p.error.message || JSON.stringify(p.error)}</p></article>`;
+  if (p.error) return `<article class="card error"><h3>${esc(providerName(p))}</h3><p>${esc(p.error.message || JSON.stringify(p.error))}</p></article>`;
   const totals = p.totals || {};
-  return `<article class="card"><h2><span>${providerName(p)}</span><span class="pill">cost</span></h2><dl>
+  return `<article class="card"><h3>${esc(providerName(p))} <span class="pill">cost</span></h3><dl>
     <dt>Session</dt><dd>${money(Number(p.sessionCostUSD))}</dd>
     <dt>Last 30 days</dt><dd>${money(Number(p.last30DaysCostUSD ?? totals.totalCost))}</dd>
     <dt>Tokens</dt><dd>${Number(totals.totalTokens || p.last30DaysTokens || 0).toLocaleString()}</dd>
     <dt>Updated</dt><dd>${fmtDate(p.updatedAt)}</dd>
   </dl></article>`;
 }
-async function load() {
-  $('status').textContent = 'Refreshing…';
-  const provider = $('provider').value;
+async function loadDashboard(provider = $('provider').value) {
+  setMessage('Refreshing dashboard…');
   const costProvider = ['codex', 'claude', 'both'].includes(provider) ? provider : 'both';
   try {
     const [health, usage, cost] = await Promise.all([
@@ -98,19 +248,35 @@ async function load() {
       fetch(`usage?provider=${encodeURIComponent(provider)}`).then(r => r.json()),
       fetch(`cost?provider=${encodeURIComponent(costProvider)}`).then(r => r.json()).catch(e => ({error: String(e)}))
     ]);
-    $('status').innerHTML = `API healthy${health.version ? ` · CodexBar ${health.version}` : ''} · ${new Date().toLocaleTimeString()}`;
+    setMessage(`API healthy${health.version ? ` · CodexBar ${esc(health.version)}` : ''} · ${new Date().toLocaleTimeString()}`, 'ok');
     $('usage').innerHTML = asArray(usage).map(usageCard).join('') || '<p class="muted">No usage payload.</p>';
-    $('cost').innerHTML = cost.error ? `<article class="card error"><pre>${cost.error}</pre></article>` : asArray(cost).map(costCard).join('');
+    $('cost').innerHTML = cost.error ? `<article class="card error"><pre>${esc(cost.error)}</pre></article>` : asArray(cost).map(costCard).join('');
   } catch (e) {
-    $('status').innerHTML = `<strong>Failed:</strong> ${e.message}`;
-    $('usage').innerHTML = '';
-    $('cost').innerHTML = '';
+    setMessage(`Dashboard failed: ${esc(e.message)}`, 'error');
   }
 }
-$('refresh').addEventListener('click', load);
-$('provider').addEventListener('change', load);
-load();
-setInterval(load, 60000);
+
+function showTab(name) {
+  ['setup','dashboard','advanced'].forEach(tab => {
+    $(`${tab}Tab`).classList.toggle('hidden', tab !== name);
+    document.querySelector(`.tab[data-tab="${tab}"]`).classList.toggle('active', tab === name);
+  });
+  if (name === 'dashboard') loadDashboard();
+}
+
+document.addEventListener('input', e => { if (e.target.matches('[data-provider][data-field]')) syncFromForm(); });
+document.addEventListener('click', e => {
+  if (e.target.matches('.tab')) showTab(e.target.dataset.tab);
+  if (e.target.matches('.test-provider')) { syncFromForm(); saveConfig().then(() => loadDashboard(e.target.dataset.testProvider)); showTab('dashboard'); }
+});
+$('saveTop').addEventListener('click', () => saveConfig());
+$('saveRaw').addEventListener('click', () => saveConfig('raw'));
+$('formatJson').addEventListener('click', () => { try { $('rawJson').value = JSON.stringify(JSON.parse($('rawJson').value), null, 2); } catch(e) { setMessage(`JSON error: ${esc(e.message)}`, 'error'); } });
+$('validate').addEventListener('click', validateConfig);
+$('refresh').addEventListener('click', () => loadDashboard());
+$('refreshDash').addEventListener('click', () => loadDashboard());
+$('provider').addEventListener('change', () => loadDashboard());
+loadConfig().catch(e => setMessage(`Failed to load setup: ${esc(e.message)}`, 'error'));
 </script>
 </body>
 </html>
