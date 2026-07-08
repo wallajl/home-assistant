@@ -1,0 +1,42 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+
+VERSION="$(bashio::config 'codexbar_version')"
+DEFAULT_PROVIDER="$(bashio::config 'default_provider')"
+REFRESH_INTERVAL="$(bashio::config 'refresh_interval')"
+REQUEST_TIMEOUT="$(bashio::config 'request_timeout')"
+LOG_LEVEL="$(bashio::config 'log_level')"
+AUTO_SEED_CONFIG="$(bashio::config 'auto_seed_config')"
+PROVIDER_CONFIG_JSON="$(bashio::config 'provider_config_json')"
+
+export CODEXBAR_HOME=/config
+export XDG_CONFIG_HOME=/config/xdg
+export CODEXBAR_CONFIG=/config/codexbar/config.json
+export HOME=/config/home
+
+mkdir -p /config/codexbar /config/xdg/codexbar /config/home /config/.codex /config/.claude
+chmod 700 /config/codexbar /config/home /config/.codex /config/.claude || true
+
+if [[ ! -x /usr/local/bin/codexbar || ! -f /usr/local/share/codexbar/VERSION || "$(cat /usr/local/share/codexbar/VERSION)" != "${VERSION}" ]]; then
+    bashio::log.info "Installing CodexBar CLI ${VERSION} for ${BUILD_ARCH:-unknown arch}"
+    /usr/local/bin/install-codexbar-cli "${VERSION}"
+fi
+
+if [[ "${AUTO_SEED_CONFIG}" == "true" ]]; then
+    if jq -e 'type == "object"' <<<"${PROVIDER_CONFIG_JSON}" >/dev/null 2>&1; then
+        if [[ ! -s "${CODEXBAR_CONFIG}" || "${PROVIDER_CONFIG_JSON}" != "{}" ]]; then
+            umask 077
+            jq '.' <<<"${PROVIDER_CONFIG_JSON}" > "${CODEXBAR_CONFIG}"
+            bashio::log.info "Wrote CodexBar provider config to ${CODEXBAR_CONFIG}"
+        fi
+    else
+        bashio::log.warning "provider_config_json is not a valid JSON object; leaving ${CODEXBAR_CONFIG} unchanged"
+    fi
+fi
+
+bashio::log.info "Starting CodexBar API on 127.0.0.1:8080 (dashboard default provider=${DEFAULT_PROVIDER}, refresh=${REFRESH_INTERVAL}s)"
+exec /usr/local/bin/codexbar serve \
+    --port 8080 \
+    --refresh-interval "${REFRESH_INTERVAL}" \
+    --request-timeout "${REQUEST_TIMEOUT}" \
+    --log-level "${LOG_LEVEL}"

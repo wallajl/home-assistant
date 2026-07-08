@@ -1,0 +1,39 @@
+name: "CodexBar"
+version: "0.1.0"
+slug: "codexbar"
+description: "Home Assistant ingress dashboard for CodexBar AI coding usage and cost stats"
+url: "https://github.com/wallajl/home-assistant"
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+stage: experimental
+ingress: true
+ingress_port: 8099
+ingress_entry: /
+ingress_stream: true
+panel_icon: mdi:chart-line
+panel_title: CodexBar
+panel_admin: true
+watchdog: "http://[HOST]:[PORT:8099]/health"
+map:
+  - type: addon_config
+    read_only: false
+options:
+  codexbar_version: "0.41.0"
+  default_provider: "all"
+  refresh_interval: 60
+  request_timeout: 30
+  log_level: "info"
+  auto_seed_config: true
+  provider_config_json: "{}"
+schema:
+  codexbar_version: "str"
+  default_provider: "list(all|both|codex|claude|openai|gemini|copilot|cursor|openrouter|litellm)"
+  refresh_interval: "int(0,3600)"
+  request_timeout: "int(0,300)"
+  log_level: "list(trace|verbose|debug|info|warning|error|critical)"
+  auto_seed_config: "bool"
+  provider_config_json: "str"

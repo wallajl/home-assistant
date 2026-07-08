@@ -10,3 +10,4 @@ This folder is for custom Home Assistant add-ons.
 - OpenClaw Node
 - Snapchat Chat GUI
 - Telegram Chat GUI
+- CodexBar

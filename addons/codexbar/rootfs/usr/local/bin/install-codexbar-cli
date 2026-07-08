@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VERSION="${1:?version required}"
+ARCH="${BUILD_ARCH:-}"
+case "${ARCH}" in
+    amd64) ASSET_ARCH="x86_64" ;;
+    aarch64) ASSET_ARCH="aarch64" ;;
+    *) echo "Unsupported Home Assistant arch: ${ARCH}" >&2; exit 1 ;;
+esac
+
+base_url="https://github.com/steipete/CodexBar/releases/download/v${VERSION}"
+asset="CodexBarCLI-v${VERSION}-linux-musl-${ASSET_ARCH}.tar.gz"
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "${tmpdir}"' EXIT
+
+curl -fsSL "${base_url}/${asset}.sha256" -o "${tmpdir}/${asset}.sha256"
+curl -fsSL "${base_url}/${asset}" -o "${tmpdir}/${asset}"
+(
+    cd "${tmpdir}"
+    expected_sha="$(awk '{print $1}' "${asset}.sha256")"
+    printf '%s  %s\n' "${expected_sha}" "${asset}" | sha256sum -c -
+    tar -xzf "${asset}"
+)
+install -m 0755 "${tmpdir}/CodexBarCLI" /usr/local/bin/CodexBarCLI
+install -m 0755 "${tmpdir}/codexbar" /usr/local/bin/codexbar
+mkdir -p /usr/local/share/codexbar
+printf '%s' "${VERSION}" > /usr/local/share/codexbar/VERSION
