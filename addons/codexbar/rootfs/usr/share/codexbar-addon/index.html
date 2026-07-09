@@ -80,17 +80,26 @@
     <section class="card ok" style="margin-top:14px">
       <h3>OAuth login</h3>
       <p>Codex and Claude subscription limits use OAuth, not normal API keys.</p>
-      <p class="muted">This add-on cannot safely receive your provider password. Log in with the normal Codex/Claude CLI on any computer, then upload the generated OAuth JSON below. The add-on saves it with 0600 permissions.</p>
+      <p class="muted">Click login. The add-on starts the provider CLI, captures the one-time browser URL/code, and saves the OAuth files after you finish in your browser.</p>
       <div id="authStatus" class="grid"></div>
-      <div class="two" style="margin-top:12px">
-        <div class="field"><label>Codex <code>~/.codex/auth.json</code></label><input id="codexAuthFile" type="file" accept="application/json,.json" /></div>
-        <div class="field"><label>Claude <code>~/.claude/.credentials.json</code></label><input id="claudeAuthFile" type="file" accept="application/json,.json" /></div>
-      </div>
       <div class="controls" style="margin-top:10px">
-        <a href="https://chatgpt.com/codex" target="_blank"><button type="button" class="ghost">Open Codex</button></a>
-        <a href="https://claude.ai/login" target="_blank"><button type="button" class="ghost">Open Claude login</button></a>
+        <button type="button" id="loginCodex" class="primary">Login to Codex</button>
+        <button type="button" id="loginClaude" class="primary">Login to Claude</button>
         <a href="https://openrouter.ai/settings/keys" target="_blank"><button type="button" class="ghost">Open OpenRouter keys</button></a>
       </div>
+      <div id="loginBox" class="hidden" style="margin-top:12px">
+        <h3 id="loginTitle">Login running…</h3>
+        <p id="loginHint" class="muted">Waiting for login URL/code…</p>
+        <div class="controls"><a id="loginUrl" href="#" target="_blank" class="hidden"><button type="button" class="primary">Open login page</button></a><button type="button" id="cancelLogin" class="ghost">Cancel login</button></div>
+        <pre id="loginOutput"></pre>
+      </div>
+      <details style="margin-top:12px">
+        <summary class="muted">Fallback: upload existing OAuth files</summary>
+        <div class="two" style="margin-top:12px">
+          <div class="field"><label>Codex <code>~/.codex/auth.json</code></label><input id="codexAuthFile" type="file" accept="application/json,.json" /></div>
+          <div class="field"><label>Claude <code>~/.claude/.credentials.json</code></label><input id="claudeAuthFile" type="file" accept="application/json,.json" /></div>
+        </div>
+      </details>
     </section>
 
     <h2>Providers</h2>
@@ -161,6 +170,52 @@ function providerName(p) { return (p.provider || p.providerID || 'provider').rep
 function providerEntry(id) { return (config.providers ||= []).find(p => p.id === id); }
 function ensureProvider(id) { let p = providerEntry(id); if (!p) { p = { id, enabled: false, source: 'auto' }; config.providers.push(p); } return p; }
 function setMessage(text, cls='muted') { $('message').className = `card status ${cls}`; $('message').innerHTML = text; }
+
+let activeLoginId = null;
+let loginPollTimer = null;
+
+async function startLogin(provider) {
+  setMessage(`Starting ${provider} login…`);
+  $('loginBox').classList.remove('hidden');
+  $('loginTitle').textContent = `${provider} login running`;
+  $('loginHint').textContent = 'Waiting for the CLI to print a login URL or code…';
+  $('loginOutput').textContent = '';
+  $('loginUrl').classList.add('hidden');
+  const res = await fetch('api/login/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider}) });
+  const data = await res.json();
+  if (!res.ok || !data.ok) { setMessage(`Could not start ${provider} login: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
+  activeLoginId = data.session.id;
+  await pollLogin();
+  if (loginPollTimer) clearInterval(loginPollTimer);
+  loginPollTimer = setInterval(pollLogin, 1500);
+}
+
+async function pollLogin() {
+  if (!activeLoginId) return;
+  const res = await fetch(`api/login/status?id=${encodeURIComponent(activeLoginId)}`);
+  const data = await res.json();
+  if (!res.ok) { setMessage(`Login status failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
+  $('loginOutput').textContent = data.output || 'No CLI output yet.';
+  if (data.url) {
+    $('loginUrl').href = data.url;
+    $('loginUrl').classList.remove('hidden');
+    $('loginHint').innerHTML = `Open this login URL, finish sign-in, then return here. If the browser did not open, copy the URL/code from the output below.`;
+  }
+  if (data.done) {
+    clearInterval(loginPollTimer); loginPollTimer = null;
+    await loadAuthStatus();
+    setMessage(data.ok ? `${data.provider} login completed.` : `${data.provider} login stopped: ${esc(data.error || 'check output')}`, data.ok ? 'ok' : 'error');
+  }
+}
+
+async function cancelLogin() {
+  if (!activeLoginId) return;
+  await fetch('api/login/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: activeLoginId}) });
+  if (loginPollTimer) clearInterval(loginPollTimer);
+  loginPollTimer = null;
+  activeLoginId = null;
+  setMessage('Login cancelled.', 'muted');
+}
 
 async function loadAuthStatus() {
   try {
@@ -329,6 +384,9 @@ $('validate').addEventListener('click', validateConfig);
 $('refresh').addEventListener('click', () => loadDashboard());
 $('refreshDash').addEventListener('click', () => loadDashboard());
 $('provider').addEventListener('change', () => loadDashboard());
+$('loginCodex').addEventListener('click', () => startLogin('codex'));
+$('loginClaude').addEventListener('click', () => startLogin('claude'));
+$('cancelLogin').addEventListener('click', cancelLogin);
 $('codexAuthFile').addEventListener('change', e => uploadAuthFile('codex', e.target.files[0]));
 $('claudeAuthFile').addEventListener('change', e => uploadAuthFile('claude', e.target.files[0]));
 loadConfig().catch(e => setMessage(`Failed to load setup: ${esc(e.message)}`, 'error'));

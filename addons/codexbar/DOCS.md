@@ -33,7 +33,9 @@ On a computer where you are already logged in:
 - Codex OAuth file: `~/.codex/auth.json`
 - Claude OAuth file: `~/.claude/.credentials.json`
 
-Upload them in the setup wizard, or copy them into the add-on configuration storage so they appear inside the add-on container as:
+The setup wizard can now start the Codex or Claude CLI inside the add-on and show you the browser login URL/code. Finish the provider login in your browser, then the CLI writes the OAuth file directly into add-on storage.
+
+Fallback: upload them in the setup wizard, or copy them into the add-on configuration storage so they appear inside the add-on container as:
 
 - Codex files: `/config/.codex`
 - Claude files: `/config/.claude`

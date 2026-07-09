@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+
+- Add one-click Codex and Claude login flows that start the vendor CLI inside the add-on and show the browser login URL/code in the Web UI.
+- Bundle the Codex and Claude Code CLIs in the add-on image so OAuth files can be generated inside persistent add-on storage.
+
 ## 0.2.2
 
 - Add browser-based OAuth file upload for Codex and Claude credentials so setup no longer requires manual add-on file copying.

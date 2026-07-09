@@ -9,7 +9,9 @@ ENV BUILD_ARCH=${BUILD_ARCH}
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apk add --no-cache ca-certificates curl jq python3 tar \
+RUN apk add --no-cache ca-certificates curl jq nodejs npm python3 tar \
+    && npm install -g @openai/codex@0.143.0 @anthropic-ai/claude-code@2.1.205 \
+    && npm cache clean --force \
     && mkdir -p /usr/share/codexbar-addon
 
 COPY rootfs /

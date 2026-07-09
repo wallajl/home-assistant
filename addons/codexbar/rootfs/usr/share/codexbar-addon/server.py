@@ -10,10 +10,15 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
+import select
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
 import time
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -23,6 +28,9 @@ ROOT = pathlib.Path("/usr/share/codexbar-addon")
 CONFIG_PATH = pathlib.Path(os.environ.get("CODEXBAR_CONFIG", "/config/codexbar/config.json"))
 CODEXBAR_URL = "http://127.0.0.1:8080"
 MAX_BODY = 512 * 1024
+LOGIN_TIMEOUT = 10 * 60
+LOGIN_SESSIONS: dict[str, "LoginSession"] = {}
+LOGIN_LOCK = threading.Lock()
 AUTH_FILES = {
     "codex": pathlib.Path("/config/.codex/auth.json"),
     "claude": pathlib.Path("/config/.claude/.credentials.json"),
@@ -235,6 +243,158 @@ def write_auth_file(provider: str, content: str) -> dict:
     return auth_status()[provider]
 
 
+class LoginSession:
+    def __init__(self, provider: str, owner: str):
+        self.owner = owner
+        if provider == "codex":
+            command = ["codex", "login", "--device-auth"]
+        elif provider == "claude":
+            command = ["claude", "auth", "login", "--claudeai"]
+        else:
+            raise ValueError("provider must be codex or claude")
+        self.id = uuid.uuid4().hex
+        self.provider = provider
+        self.command = command
+        self.output = ""
+        self.url: str | None = None
+        self.done = False
+        self.ok = False
+        self.error: str | None = None
+        self.started = time.time()
+        self.process: subprocess.Popen[bytes] | None = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+
+    def _env(self) -> dict[str, str]:
+        env = os.environ.copy()
+        env["HOME"] = "/config"
+        env["XDG_CONFIG_HOME"] = "/config/xdg"
+        env["CODEXBAR_CONFIG"] = str(CONFIG_PATH)
+        env["CODEXBAR_HOME"] = "/config"
+        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+        return env
+
+    def _append(self, text: str) -> None:
+        self.output = (self.output + text)[-12000:]
+        match = re.search(r"https?://[^\s)>'\"]+", self.output)
+        if match:
+            self.url = match.group(0).rstrip(".,;:)]}>")
+
+    def _run(self) -> None:
+        master_fd = None
+        try:
+            master_fd, slave_fd = os.openpty()
+            self.process = subprocess.Popen(
+                self.command,
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                env=self._env(),
+                preexec_fn=os.setsid,
+                close_fds=True,
+            )
+            os.close(slave_fd)
+            deadline = time.time() + LOGIN_TIMEOUT
+            while time.time() < deadline:
+                if self.process.poll() is not None:
+                    break
+                readable, _, _ = select.select([master_fd], [], [], 0.25)
+                if readable:
+                    try:
+                        chunk = os.read(master_fd, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    text = chunk.decode("utf-8", errors="replace")
+                    self._append(text)
+            # drain after exit/timeout
+            end_drain = time.time() + 1.5
+            while time.time() < end_drain:
+                readable, _, _ = select.select([master_fd], [], [], 0.1)
+                if not readable:
+                    continue
+                try:
+                    chunk = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                self._append(chunk.decode("utf-8", errors="replace"))
+            if self.process.poll() is None:
+                self.error = "Login timed out waiting for the provider CLI to finish. You can retry."
+                self.cancel()
+            else:
+                self.ok = self.process.returncode == 0 or "successfully logged in" in self.output.lower() or "login successful" in self.output.lower()
+                if not self.ok:
+                    self.error = f"Login command exited with status {self.process.returncode}."
+        except FileNotFoundError as exc:
+            self.error = f"Missing login CLI: {exc}"
+        except Exception as exc:  # noqa: BLE001
+            self.error = str(exc)
+        finally:
+            if master_fd is not None:
+                try:
+                    os.close(master_fd)
+                except OSError:
+                    pass
+            self.done = True
+
+    def cancel(self) -> None:
+        proc = self.process
+        if proc and proc.poll() is None:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except Exception:
+                proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                except Exception:
+                    proc.kill()
+
+    def status(self) -> dict:
+        return {
+            "id": self.id,
+            "provider": self.provider,
+            "command": " ".join(self.command),
+            "done": self.done,
+            "ok": self.ok,
+            "error": self.error,
+            "url": self.url,
+            "output": self.output,
+            "auth": auth_status().get(self.provider),
+        }
+
+
+def start_login(provider: str, owner: str) -> LoginSession:
+    with LOGIN_LOCK:
+        active_count = 0
+        for sid, existing in list(LOGIN_SESSIONS.items()):
+            if existing.done and time.time() - existing.started > 900:
+                LOGIN_SESSIONS.pop(sid, None)
+                continue
+            if not existing.done:
+                active_count += 1
+                if existing.provider == provider and existing.owner == owner:
+                    existing.cancel()
+        if active_count >= 2:
+            raise RuntimeError("Too many login sessions are already running. Cancel one and retry.")
+        session = LoginSession(provider, owner)
+        LOGIN_SESSIONS[session.id] = session
+    return session
+
+
+def get_login_session(session_id: str, owner: str | None = None) -> LoginSession | None:
+    with LOGIN_LOCK:
+        session = LOGIN_SESSIONS.get(session_id)
+        if session and owner is not None and session.owner != owner:
+            return None
+        return session
+
+
 def proxy_get(path: str, timeout: int = 45) -> tuple[int, bytes, str]:
     url = CODEXBAR_URL + path
     req = urllib.request.Request(url, headers={"Host": "127.0.0.1:8080"})
@@ -253,7 +413,9 @@ class Handler(BaseHTTPRequestHandler):
     server_version = "CodexBarSetup/0.2"
 
     def log_message(self, fmt: str, *args: object) -> None:
-        print(f"{self.address_string()} - {fmt % args}", flush=True)
+        message = fmt % args
+        message = re.sub(r"([?&]id=)[A-Za-z0-9_-]+", r"\1[REDACTED]", message)
+        print(f"{self.address_string()} - {message}", flush=True)
 
     def send_json(self, payload: object, status: int = 200) -> None:
         body = json.dumps(payload, indent=2).encode()
@@ -304,6 +466,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/auth-status":
             self.send_json(auth_status())
             return
+        if path == "/api/login/status":
+            session_id = urllib.parse.parse_qs(parsed.query).get("id", [""])[0]
+            session = get_login_session(session_id, self.client_address[0])
+            if not session:
+                self.send_json({"ok": False, "error": "login session not found"}, 404)
+                return
+            self.send_json(session.status())
+            return
         if path == "/api/validate":
             ok, msg = validate_config(read_config())
             payload = {"ok": ok, "message": msg, "codexbar": run_codexbar_validate()}
@@ -351,6 +521,28 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copy2(CONFIG_PATH, backup)
             write_config(data)  # type: ignore[arg-type]
             self.send_json({"ok": True, "path": str(CONFIG_PATH), "backup": str(backup) if backup else None, "validation": run_codexbar_validate()})
+            return
+        if parsed.path == "/api/login/start":
+            if not isinstance(payload, dict):
+                self.send_json({"ok": False, "error": "Expected JSON object"}, 400)
+                return
+            try:
+                session = start_login(str(payload.get("provider", "")), self.client_address[0])
+            except Exception as exc:  # noqa: BLE001
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, "session": session.status()})
+            return
+        if parsed.path == "/api/login/cancel":
+            if not isinstance(payload, dict):
+                self.send_json({"ok": False, "error": "Expected JSON object"}, 400)
+                return
+            session = get_login_session(str(payload.get("id", "")), self.client_address[0])
+            if not session:
+                self.send_json({"ok": False, "error": "login session not found"}, 404)
+                return
+            session.cancel()
+            self.send_json({"ok": True, "session": session.status()})
             return
         if parsed.path == "/api/auth-upload":
             if not isinstance(payload, dict):
