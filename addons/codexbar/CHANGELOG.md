@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Make setup UI API calls resolve correctly when Home Assistant opens the add-on through an ingress menu URL without a trailing slash.
+
 ## 0.3.1
 
 - Strip terminal ANSI escape codes from Codex/Claude login output so the displayed URL and one-time code are readable and the Open login button uses a clean URL.

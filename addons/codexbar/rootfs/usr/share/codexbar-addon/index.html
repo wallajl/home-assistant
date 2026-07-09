@@ -158,6 +158,7 @@ CodexBar config: /config/codexbar/config.json</pre>
 
 <script>
 const $ = (id) => document.getElementById(id);
+const apiUrl = (path) => new URL(path, window.location.href.endsWith('/') ? window.location.href : window.location.href + '/').toString();
 let config = { version: 1, providers: [] };
 let presets = [];
 
@@ -181,7 +182,7 @@ async function startLogin(provider) {
   $('loginHint').textContent = 'Waiting for the CLI to print a login URL or code…';
   $('loginOutput').textContent = '';
   $('loginUrl').classList.add('hidden');
-  const res = await fetch('api/login/start', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider}) });
+  const res = await fetch(apiUrl('api/login/start'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider}) });
   const data = await res.json();
   if (!res.ok || !data.ok) { setMessage(`Could not start ${provider} login: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
   activeLoginId = data.session.id;
@@ -192,7 +193,7 @@ async function startLogin(provider) {
 
 async function pollLogin() {
   if (!activeLoginId) return;
-  const res = await fetch(`api/login/status?id=${encodeURIComponent(activeLoginId)}`);
+  const res = await fetch(apiUrl(`api/login/status?id=${encodeURIComponent(activeLoginId)}`));
   const data = await res.json();
   if (!res.ok) { setMessage(`Login status failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
   $('loginOutput').textContent = data.output || 'No CLI output yet.';
@@ -210,7 +211,7 @@ async function pollLogin() {
 
 async function cancelLogin() {
   if (!activeLoginId) return;
-  await fetch('api/login/cancel', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: activeLoginId}) });
+  await fetch(apiUrl('api/login/cancel'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: activeLoginId}) });
   if (loginPollTimer) clearInterval(loginPollTimer);
   loginPollTimer = null;
   activeLoginId = null;
@@ -219,7 +220,7 @@ async function cancelLogin() {
 
 async function loadAuthStatus() {
   try {
-    const res = await fetch('api/auth-status');
+    const res = await fetch(apiUrl('api/auth-status'));
     const data = await res.json();
     $('authStatus').innerHTML = ['codex','claude'].map(provider => {
       const item = data[provider] || {};
@@ -233,7 +234,7 @@ async function loadAuthStatus() {
 async function uploadAuthFile(provider, file) {
   if (!file) return;
   const content = await file.text();
-  const res = await fetch('api/auth-upload', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider, content}) });
+  const res = await fetch(apiUrl('api/auth-upload'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider, content}) });
   const data = await res.json();
   if (!res.ok || !data.ok) { setMessage(`${provider} OAuth upload failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
   $(`${provider}AuthFile`).value = '';
@@ -279,7 +280,7 @@ function syncFromForm() {
 
 async function loadConfig() {
   await loadAuthStatus();
-  const res = await fetch('api/config');
+  const res = await fetch(apiUrl('api/config'));
   const data = await res.json();
   config = data.config || { version: 1, providers: [] };
   if (!Array.isArray(config.providers)) config.providers = [];
@@ -295,7 +296,7 @@ async function saveConfig(source='form') {
     if (source === 'raw') config = JSON.parse($('rawJson').value);
     else syncFromForm();
   } catch (e) { setMessage(`JSON error: ${esc(e.message)}`, 'error'); return; }
-  const res = await fetch('api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({config}) });
+  const res = await fetch(apiUrl('api/config'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({config}) });
   const data = await res.json();
   if (!res.ok || !data.ok) { setMessage(`Save failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
   $('validationOutput').textContent = JSON.stringify(data.validation || data, null, 2);
@@ -305,7 +306,7 @@ async function saveConfig(source='form') {
 
 async function validateConfig() {
   syncFromForm();
-  const res = await fetch('api/validate');
+  const res = await fetch(apiUrl('api/validate'));
   const data = await res.json();
   $('validationOutput').textContent = JSON.stringify(data, null, 2);
   setMessage(data.ok ? 'Config structure is valid.' : `Validation failed: ${esc(data.message)}`, data.ok ? 'ok' : 'error');
@@ -340,7 +341,7 @@ function costCard(p) {
 }
 async function testProvider(provider) {
   setMessage(`Testing ${esc(provider)}…`);
-  const res = await fetch(`api/test?provider=${encodeURIComponent(provider)}`);
+  const res = await fetch(apiUrl(`api/test?provider=${encodeURIComponent(provider)}`));
   const data = await res.json();
   $('validationOutput').textContent = JSON.stringify(data, null, 2);
   setMessage(data.ok ? `${provider} test OK.` : `${provider} test failed: ${esc(JSON.stringify(data.payload || data.error || data))}`, data.ok ? 'ok' : 'error');
@@ -352,9 +353,9 @@ async function loadDashboard(provider = $('provider').value) {
   const costProvider = ['codex', 'claude', 'both'].includes(provider) ? provider : 'both';
   try {
     const [health, usage, cost] = await Promise.all([
-      fetch('health').then(r => r.json()),
-      fetch(`usage?provider=${encodeURIComponent(provider)}`).then(r => r.json()).catch(e => ({error: String(e)})),
-      fetch(`cost?provider=${encodeURIComponent(costProvider)}`).then(r => r.json()).catch(e => ({error: String(e)}))
+      fetch(apiUrl('health')).then(r => r.json()),
+      fetch(apiUrl(`usage?provider=${encodeURIComponent(provider)}`)).then(r => r.json()).catch(e => ({error: String(e)})),
+      fetch(apiUrl(`cost?provider=${encodeURIComponent(costProvider)}`)).then(r => r.json()).catch(e => ({error: String(e)}))
     ]);
     setMessage(`API healthy${health.version ? ` · CodexBar ${esc(health.version)}` : ''} · ${new Date().toLocaleTimeString()}`, 'ok');
     $('usage').innerHTML = asArray(usage).map(usageCard).join('') || '<p class="muted">No usage payload.</p>';
