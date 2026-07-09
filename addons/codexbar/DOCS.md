@@ -33,7 +33,7 @@ On a computer where you are already logged in:
 - Codex OAuth file: `~/.codex/auth.json`
 - Claude OAuth file: `~/.claude/.credentials.json`
 
-Copy them into the add-on configuration storage so they appear inside the add-on container as:
+Upload them in the setup wizard, or copy them into the add-on configuration storage so they appear inside the add-on container as:
 
 - Codex files: `/config/.codex`
 - Claude files: `/config/.claude`

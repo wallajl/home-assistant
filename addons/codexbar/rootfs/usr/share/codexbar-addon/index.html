@@ -78,9 +78,19 @@
     </section>
 
     <section class="card ok" style="margin-top:14px">
-      <h3>OAuth login note</h3>
+      <h3>OAuth login</h3>
       <p>Codex and Claude subscription limits use OAuth, not normal API keys.</p>
-      <p class="muted">Run/login with the normal CLIs on a computer, then copy <code>~/.codex/auth.json</code> to <code>/config/.codex/auth.json</code> and <code>~/.claude/.credentials.json</code> to <code>/config/.claude/.credentials.json</code> in this add-on's config storage. Restart the add-on after copying.</p>
+      <p class="muted">This add-on cannot safely receive your provider password. Log in with the normal Codex/Claude CLI on any computer, then upload the generated OAuth JSON below. The add-on saves it with 0600 permissions.</p>
+      <div id="authStatus" class="grid"></div>
+      <div class="two" style="margin-top:12px">
+        <div class="field"><label>Codex <code>~/.codex/auth.json</code></label><input id="codexAuthFile" type="file" accept="application/json,.json" /></div>
+        <div class="field"><label>Claude <code>~/.claude/.credentials.json</code></label><input id="claudeAuthFile" type="file" accept="application/json,.json" /></div>
+      </div>
+      <div class="controls" style="margin-top:10px">
+        <a href="https://chatgpt.com/codex" target="_blank"><button type="button" class="ghost">Open Codex</button></a>
+        <a href="https://claude.ai/login" target="_blank"><button type="button" class="ghost">Open Claude login</button></a>
+        <a href="https://openrouter.ai/settings/keys" target="_blank"><button type="button" class="ghost">Open OpenRouter keys</button></a>
+      </div>
     </section>
 
     <h2>Providers</h2>
@@ -105,6 +115,9 @@ CodexBar config: /config/codexbar/config.json</pre>
         <option value="openai">openai</option>
         <option value="openrouter">openrouter</option>
         <option value="litellm">litellm</option>
+        <option value="llmproxy">llmproxy</option>
+        <option value="gemini">gemini</option>
+        <option value="copilot">copilot</option>
       </select>
       <button id="refreshDash" class="ghost">Refresh dashboard</button>
     </div>
@@ -149,6 +162,30 @@ function providerEntry(id) { return (config.providers ||= []).find(p => p.id ===
 function ensureProvider(id) { let p = providerEntry(id); if (!p) { p = { id, enabled: false, source: 'auto' }; config.providers.push(p); } return p; }
 function setMessage(text, cls='muted') { $('message').className = `card status ${cls}`; $('message').innerHTML = text; }
 
+async function loadAuthStatus() {
+  try {
+    const res = await fetch('api/auth-status');
+    const data = await res.json();
+    $('authStatus').innerHTML = ['codex','claude'].map(provider => {
+      const item = data[provider] || {};
+      return `<article class="card ${item.ok ? 'ok' : 'warn'}"><h3>${provider}</h3><p>${esc(item.message || 'Unknown')}</p><p class="muted">${esc(item.path || '')}</p></article>`;
+    }).join('');
+  } catch (e) {
+    $('authStatus').innerHTML = `<article class="card error">Could not load OAuth status: ${esc(e.message)}</article>`;
+  }
+}
+
+async function uploadAuthFile(provider, file) {
+  if (!file) return;
+  const content = await file.text();
+  const res = await fetch('api/auth-upload', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider, content}) });
+  const data = await res.json();
+  if (!res.ok || !data.ok) { setMessage(`${provider} OAuth upload failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
+  $(`${provider}AuthFile`).value = '';
+  setMessage(`${provider} OAuth file saved. Restart the add-on if the provider was already failing.`, 'ok');
+  await loadAuthStatus();
+}
+
 function renderProviders() {
   $('providerGrid').innerHTML = presets.map(preset => {
     const p = providerEntry(preset.id) || { id: preset.id, enabled: false, source: preset.defaultSource || 'auto' };
@@ -165,7 +202,7 @@ function renderProviders() {
         ${['auto','api','oauth','web','cli'].map(v => `<option value="${v}" ${((p.source || preset.defaultSource || 'auto') === v) ? 'selected' : ''}>${v}</option>`).join('')}
       </select></div>
       ${fieldHtml}
-      <div class="controls"><button class="ghost test-provider" data-test-provider="${preset.id}">Test ${esc(preset.name)}</button></div>
+      <div class="controls"><button class="ghost test-provider" data-test-provider="${preset.id}">Save + test ${esc(preset.name)}</button></div>
     </article>`;
   }).join('');
 }
@@ -186,6 +223,7 @@ function syncFromForm() {
 }
 
 async function loadConfig() {
+  await loadAuthStatus();
   const res = await fetch('api/config');
   const data = await res.json();
   config = data.config || { version: 1, providers: [] };
@@ -245,13 +283,22 @@ function costCard(p) {
     <dt>Updated</dt><dd>${fmtDate(p.updatedAt)}</dd>
   </dl></article>`;
 }
+async function testProvider(provider) {
+  setMessage(`Testing ${esc(provider)}…`);
+  const res = await fetch(`api/test?provider=${encodeURIComponent(provider)}`);
+  const data = await res.json();
+  $('validationOutput').textContent = JSON.stringify(data, null, 2);
+  setMessage(data.ok ? `${provider} test OK.` : `${provider} test failed: ${esc(JSON.stringify(data.payload || data.error || data))}`, data.ok ? 'ok' : 'error');
+  showTab('advanced');
+}
+
 async function loadDashboard(provider = $('provider').value) {
   setMessage('Refreshing dashboard…');
   const costProvider = ['codex', 'claude', 'both'].includes(provider) ? provider : 'both';
   try {
     const [health, usage, cost] = await Promise.all([
       fetch('health').then(r => r.json()),
-      fetch(`usage?provider=${encodeURIComponent(provider)}`).then(r => r.json()),
+      fetch(`usage?provider=${encodeURIComponent(provider)}`).then(r => r.json()).catch(e => ({error: String(e)})),
       fetch(`cost?provider=${encodeURIComponent(costProvider)}`).then(r => r.json()).catch(e => ({error: String(e)}))
     ]);
     setMessage(`API healthy${health.version ? ` · CodexBar ${esc(health.version)}` : ''} · ${new Date().toLocaleTimeString()}`, 'ok');
@@ -273,7 +320,7 @@ function showTab(name) {
 document.addEventListener('input', e => { if (e.target.matches('[data-provider][data-field]')) syncFromForm(); });
 document.addEventListener('click', e => {
   if (e.target.matches('.tab')) showTab(e.target.dataset.tab);
-  if (e.target.matches('.test-provider')) { syncFromForm(); saveConfig().then(() => loadDashboard(e.target.dataset.testProvider)); showTab('dashboard'); }
+  if (e.target.matches('.test-provider')) { const provider = e.target.dataset.testProvider; syncFromForm(); saveConfig().then(() => testProvider(provider)); }
 });
 $('saveTop').addEventListener('click', () => saveConfig());
 $('saveRaw').addEventListener('click', () => saveConfig('raw'));
@@ -282,6 +329,8 @@ $('validate').addEventListener('click', validateConfig);
 $('refresh').addEventListener('click', () => loadDashboard());
 $('refreshDash').addEventListener('click', () => loadDashboard());
 $('provider').addEventListener('change', () => loadDashboard());
+$('codexAuthFile').addEventListener('change', e => uploadAuthFile('codex', e.target.files[0]));
+$('claudeAuthFile').addEventListener('change', e => uploadAuthFile('claude', e.target.files[0]));
 loadConfig().catch(e => setMessage(`Failed to load setup: ${esc(e.message)}`, 'error'));
 </script>
 </body>

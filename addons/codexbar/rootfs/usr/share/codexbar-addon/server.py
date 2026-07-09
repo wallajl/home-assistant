@@ -23,6 +23,10 @@ ROOT = pathlib.Path("/usr/share/codexbar-addon")
 CONFIG_PATH = pathlib.Path(os.environ.get("CODEXBAR_CONFIG", "/config/codexbar/config.json"))
 CODEXBAR_URL = "http://127.0.0.1:8080"
 MAX_BODY = 512 * 1024
+AUTH_FILES = {
+    "codex": pathlib.Path("/config/.codex/auth.json"),
+    "claude": pathlib.Path("/config/.claude/.credentials.json"),
+}
 ALLOWED_CLIENTS = {
     item.strip()
     for item in os.environ.get("CODEXBAR_SETUP_ALLOWED_CLIENTS", "172.30.32.2,127.0.0.1").split(",")
@@ -34,8 +38,8 @@ PROVIDER_PRESETS = [
         "id": "codex",
         "name": "Codex",
         "defaultSource": "auto",
-        "auth": "Local Codex CLI / OAuth files",
-        "help": "Best if /config/.codex contains your Codex CLI auth. API-key setup is not used for Codex quota data.",
+        "auth": "OAuth file from Codex CLI",
+        "help": "Codex subscription quota uses OAuth from /config/.codex/auth.json. There is no normal API-key box for Codex quota.",
         "fields": [],
     },
     {
@@ -59,7 +63,7 @@ PROVIDER_PRESETS = [
         "name": "OpenRouter",
         "defaultSource": "api",
         "auth": "OpenRouter API key",
-        "help": "Shows OpenRouter credit balance and usage where supported.",
+        "help": "Paste a sk-or-v1... key from https://openrouter.ai/settings/keys. OpenRouter does not use OAuth here.",
         "fields": ["apiKey"],
     },
     {
@@ -95,6 +99,7 @@ PROVIDER_PRESETS = [
         "fields": ["apiKey"],
     },
 ]
+PROVIDER_IDS = {provider["id"] for provider in PROVIDER_PRESETS}
 
 
 def read_config() -> dict:
@@ -176,6 +181,60 @@ def run_codexbar_validate() -> dict:
     }
 
 
+def auth_status() -> dict:
+    status: dict[str, dict[str, object]] = {}
+    for provider, path in AUTH_FILES.items():
+        item: dict[str, object] = {"path": str(path), "exists": path.exists()}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if provider == "codex":
+                    tokens = data.get("tokens") if isinstance(data, dict) else None
+                    item["ok"] = isinstance(tokens, dict) and bool(tokens.get("access_token") or tokens.get("refresh_token"))
+                    item["account_id"] = tokens.get("account_id") if isinstance(tokens, dict) else None
+                elif provider == "claude":
+                    oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+                    item["ok"] = isinstance(oauth, dict) and bool(oauth.get("accessToken") or oauth.get("refreshToken"))
+                item["message"] = "OAuth file looks usable" if item.get("ok") else "File exists but does not look like the expected OAuth JSON"
+            except Exception as exc:  # noqa: BLE001
+                item["ok"] = False
+                item["message"] = f"Could not read JSON: {exc}"
+        else:
+            item["ok"] = False
+            item["message"] = "Not uploaded yet"
+        status[provider] = item
+    return status
+
+
+def write_auth_file(provider: str, content: str) -> dict:
+    if provider not in AUTH_FILES:
+        raise ValueError("provider must be codex or claude")
+    data = json.loads(content)
+    if provider == "codex":
+        tokens = data.get("tokens") if isinstance(data, dict) else None
+        if not isinstance(tokens, dict) or not (tokens.get("access_token") or tokens.get("refresh_token")):
+            raise ValueError("Codex auth.json must contain tokens.access_token or tokens.refresh_token")
+    if provider == "claude":
+        oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
+        if not isinstance(oauth, dict) or not (oauth.get("accessToken") or oauth.get("refreshToken")):
+            raise ValueError("Claude .credentials.json must contain claudeAiOauth accessToken or refreshToken")
+    path = AUTH_FILES[provider]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=2)
+            fh.write("\n")
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, path)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+    return auth_status()[provider]
+
+
 def proxy_get(path: str, timeout: int = 45) -> tuple[int, bytes, str]:
     url = CODEXBAR_URL + path
     req = urllib.request.Request(url, headers={"Host": "127.0.0.1:8080"})
@@ -242,6 +301,9 @@ class Handler(BaseHTTPRequestHandler):
             cfg = read_config()
             self.send_json({"path": str(CONFIG_PATH), "config": cfg, "presets": PROVIDER_PRESETS})
             return
+        if path == "/api/auth-status":
+            self.send_json(auth_status())
+            return
         if path == "/api/validate":
             ok, msg = validate_config(read_config())
             payload = {"ok": ok, "message": msg, "codexbar": run_codexbar_validate()}
@@ -250,6 +312,21 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/health", "/usage", "/cost"):
             status, body, content_type = proxy_get(path + query)
             self.send_bytes(body, status, content_type)
+            return
+        if path == "/api/test":
+            provider = urllib.parse.parse_qs(parsed.query).get("provider", [""])[0]
+            if not provider:
+                self.send_json({"ok": False, "error": "provider is required"}, 400)
+                return
+            if provider not in PROVIDER_IDS:
+                self.send_json({"ok": False, "error": f"unknown provider: {provider}"}, 400)
+                return
+            status, body, _content_type = proxy_get("/usage?provider=" + urllib.parse.quote(provider))
+            try:
+                payload = json.loads(body.decode("utf-8"))
+            except Exception:
+                payload = body.decode("utf-8", errors="replace")
+            self.send_json({"ok": 200 <= status < 300, "status": status, "provider": provider, "payload": payload}, 200 if status < 500 else 502)
             return
         self.send_json({"error": "not found"}, 404)
 
@@ -274,6 +351,17 @@ class Handler(BaseHTTPRequestHandler):
                 shutil.copy2(CONFIG_PATH, backup)
             write_config(data)  # type: ignore[arg-type]
             self.send_json({"ok": True, "path": str(CONFIG_PATH), "backup": str(backup) if backup else None, "validation": run_codexbar_validate()})
+            return
+        if parsed.path == "/api/auth-upload":
+            if not isinstance(payload, dict):
+                self.send_json({"ok": False, "error": "Expected JSON object"}, 400)
+                return
+            try:
+                result = write_auth_file(str(payload.get("provider", "")), str(payload.get("content", "")))
+            except Exception as exc:  # noqa: BLE001
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, "auth": result})
             return
         self.send_json({"ok": False, "error": "not found"}, 404)
 

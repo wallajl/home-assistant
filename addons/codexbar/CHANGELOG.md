@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.2
+
+- Add browser-based OAuth file upload for Codex and Claude credentials so setup no longer requires manual add-on file copying.
+- Add provider-specific test endpoint and clearer OpenRouter setup links/errors.
+
 ## 0.2.1
 
 - Fix OAuth credential discovery inside the add-on by setting `HOME=/config`, so CodexBar can read `/config/.codex/auth.json` and `/config/.claude/.credentials.json`.
