@@ -31,6 +31,7 @@ MAX_BODY = 512 * 1024
 LOGIN_TIMEOUT = 10 * 60
 LOGIN_SESSIONS: dict[str, "LoginSession"] = {}
 LOGIN_LOCK = threading.Lock()
+ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 AUTH_FILES = {
     "codex": pathlib.Path("/config/.codex/auth.json"),
     "claude": pathlib.Path("/config/.claude/.credentials.json"),
@@ -275,6 +276,7 @@ class LoginSession:
         return env
 
     def _append(self, text: str) -> None:
+        text = ANSI_ESCAPE_RE.sub("", text).replace("\r", "")
         self.output = (self.output + text)[-12000:]
         match = re.search(r"https?://[^\s)>'\"]+", self.output)
         if match:

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Strip terminal ANSI escape codes from Codex/Claude login output so the displayed URL and one-time code are readable and the Open login button uses a clean URL.
+
 ## 0.3.0
 
 - Add one-click Codex and Claude login flows that start the vendor CLI inside the add-on and show the browser login URL/code in the Web UI.
