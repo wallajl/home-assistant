@@ -14,6 +14,16 @@ export HOME=/config
 mkdir -p /config/codexbar /config/xdg/codexbar /config/.codex /config/.claude
 chmod 700 /config/codexbar /config/.codex /config/.claude || true
 
+# Swift's FileManager.homeDirectoryForCurrentUser resolves /root from passwd
+# even when HOME=/config. Keep the official CLI files in persistent /config,
+# but expose them at the path CodexBar's Swift credential readers use.
+for provider_home in .codex .claude; do
+    if [[ -e "/root/${provider_home}" && ! -L "/root/${provider_home}" ]]; then
+        rm -rf "/root/${provider_home}"
+    fi
+    ln -sfn "/config/${provider_home}" "/root/${provider_home}"
+done
+
 if [[ ! -x /usr/local/bin/codexbar || ! -f /usr/local/share/codexbar/VERSION || "$(cat /usr/local/share/codexbar/VERSION)" != "${VERSION}" ]]; then
     bashio::log.info "Installing CodexBar CLI ${VERSION} for ${BUILD_ARCH:-unknown arch}"
     /usr/local/bin/install-codexbar-cli "${VERSION}"

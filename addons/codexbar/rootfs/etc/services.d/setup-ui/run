@@ -4,6 +4,7 @@ export CODEXBAR_HOME=/config
 export XDG_CONFIG_HOME=/config/xdg
 export CODEXBAR_CONFIG=/config/codexbar/config.json
 export HOME=/config
+export CODEXBAR_REQUEST_TIMEOUT="$(bashio::config 'request_timeout')"
 if bashio::config.has_value 'history_interval'; then
     export CODEXBAR_HISTORY_INTERVAL="$(bashio::config 'history_interval')"
 else

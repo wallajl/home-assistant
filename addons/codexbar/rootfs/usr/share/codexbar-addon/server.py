@@ -44,6 +44,8 @@ HISTORY_PATH = CONFIG_PATH.parent / "history.json"
 ACTIVITY_LOG_PATH = CONFIG_PATH.parent / "activity.log"
 HISTORY_DAYS = 7
 HISTORY_INTERVAL = max(60, int(os.environ.get("CODEXBAR_HISTORY_INTERVAL", "300")))
+PROVIDER_TIMEOUT = max(5, int(os.environ.get("CODEXBAR_REQUEST_TIMEOUT", "90")))
+PROXY_TIMEOUT = PROVIDER_TIMEOUT + 20
 HISTORY_LOCK = threading.Lock()
 BACKGROUND_STATUS: dict[str, object] = {
     "running": False,
@@ -100,7 +102,7 @@ def default_config() -> dict:
         "version": 1,
         "providers": [
             {"id": "codex", "enabled": True, "source": "auto"},
-            {"id": "claude", "enabled": True, "source": "auto"},
+            {"id": "claude", "enabled": True, "source": "oauth"},
         ],
     }
 
@@ -612,11 +614,11 @@ def get_login_session(session_id: str, owner: str | None = None) -> LoginSession
         return session
 
 
-def proxy_get(path: str, timeout: int = 45) -> tuple[int, bytes, str]:
+def proxy_get(path: str, timeout: int | None = None) -> tuple[int, bytes, str]:
     url = CODEXBAR_URL + path
     req = urllib.request.Request(url, headers={"Host": "127.0.0.1:8080"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with urllib.request.urlopen(req, timeout=timeout or PROXY_TIMEOUT) as resp:
             content_type = resp.headers.get("Content-Type", "application/json; charset=utf-8")
             return resp.status, resp.read(), content_type
     except urllib.error.HTTPError as exc:

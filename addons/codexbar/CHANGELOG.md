@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Fix CodexBar's Linux credential discovery by linking its passwd-derived `/root` home paths to persistent `/config` OAuth storage.
+- Select Claude OAuth explicitly instead of CLI text parsing in the headless server runtime.
+- Raise the default provider timeout and align the Ingress proxy timeout with it.
+
 ## 0.5.0
 
 - Add one combined seven-day trend graph for Codex and Claude weekly quota usage.
