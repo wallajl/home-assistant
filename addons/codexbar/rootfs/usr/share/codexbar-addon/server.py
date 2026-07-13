@@ -40,6 +40,21 @@ MAX_BODY = 512 * 1024
 LOGIN_TIMEOUT = 10 * 60
 LOGIN_SESSIONS: dict[str, "LoginSession"] = {}
 LOGIN_LOCK = threading.Lock()
+HISTORY_PATH = CONFIG_PATH.parent / "history.json"
+ACTIVITY_LOG_PATH = CONFIG_PATH.parent / "activity.log"
+HISTORY_DAYS = 7
+HISTORY_INTERVAL = max(60, int(os.environ.get("CODEXBAR_HISTORY_INTERVAL", "300")))
+HISTORY_LOCK = threading.Lock()
+BACKGROUND_STATUS: dict[str, object] = {
+    "running": False,
+    "intervalSeconds": HISTORY_INTERVAL,
+    "lastAttempt": None,
+    "lastSuccess": None,
+    "lastError": None,
+    "claudeAuthOk": None,
+    "sampleCount": 0,
+}
+BACKGROUND_LOCK = threading.Lock()
 # OSC sequences (terminal hyperlinks/titles): ESC ] ... BEL or ESC ] ... ESC \
 OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 # CSI and two-byte escape sequences (colors, cursor movement, ...)
@@ -221,6 +236,184 @@ def auth_status() -> dict:
 
 
 
+def provider_environment() -> dict[str, str]:
+    env = os.environ.copy()
+    env["HOME"] = str(CONFIG_HOME)
+    env["XDG_CONFIG_HOME"] = str(CONFIG_HOME / "xdg")
+    env["CODEXBAR_CONFIG"] = str(CONFIG_PATH)
+    env["CODEXBAR_HOME"] = str(CONFIG_HOME)
+    env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+    return env
+
+
+def activity_log(event: str, message: str, **fields: object) -> None:
+    """Write a bounded, secret-free activity log for background collection."""
+    entry = {
+        "timestamp": int(time.time()),
+        "event": event,
+        "message": message,
+        **fields,
+    }
+    try:
+        ACTIVITY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        if ACTIVITY_LOG_PATH.exists() and ACTIVITY_LOG_PATH.stat().st_size > 512 * 1024:
+            rotated = ACTIVITY_LOG_PATH.with_suffix(".log.1")
+            os.replace(ACTIVITY_LOG_PATH, rotated)
+        with ACTIVITY_LOG_PATH.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, separators=(",", ":")) + "\n")
+        os.chmod(ACTIVITY_LOG_PATH, 0o600)
+    except OSError as exc:
+        print(f"WARNING: could not write activity log: {exc}", flush=True)
+    print(f"background[{event}] {message}", flush=True)
+
+
+def read_activity_log(limit: int = 30) -> list[dict[str, object]]:
+    if not ACTIVITY_LOG_PATH.exists():
+        return []
+    entries: list[dict[str, object]] = []
+    try:
+        for line in ACTIVITY_LOG_PATH.read_text(encoding="utf-8", errors="replace").splitlines()[-limit:]:
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(item, dict):
+                entries.append(item)
+    except OSError:
+        return []
+    return entries
+
+
+def load_history() -> list[dict[str, object]]:
+    if not HISTORY_PATH.exists():
+        return []
+    try:
+        data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
+        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def write_history(samples: list[dict[str, object]]) -> None:
+    HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, temp_name = tempfile.mkstemp(prefix="history.", suffix=".json", dir=str(HISTORY_PATH.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(samples, fh, separators=(",", ":"))
+            fh.write("\n")
+        os.chmod(temp_name, 0o600)
+        os.replace(temp_name, HISTORY_PATH)
+    finally:
+        try:
+            os.unlink(temp_name)
+        except FileNotFoundError:
+            pass
+
+
+def usage_samples(payload: object, timestamp: int | None = None) -> list[dict[str, object]]:
+    now = int(timestamp or time.time())
+    providers = payload if isinstance(payload, list) else [payload]
+    samples: list[dict[str, object]] = []
+    for item in providers:
+        if not isinstance(item, dict) or item.get("error"):
+            continue
+        provider = str(item.get("provider") or item.get("providerID") or "").lower()
+        if provider not in PROVIDER_IDS:
+            continue
+        usage = item.get("usage") if isinstance(item.get("usage"), dict) else item
+        weekly = usage.get("secondary") if isinstance(usage, dict) else None
+        if not isinstance(weekly, dict):
+            continue
+        raw_used = weekly.get("usedPercent")
+        if raw_used is None and weekly.get("remainingPercent") is not None:
+            try:
+                raw_used = 100 - float(weekly["remainingPercent"])
+            except (TypeError, ValueError):
+                raw_used = None
+        try:
+            used = max(0.0, min(100.0, float(raw_used)))
+        except (TypeError, ValueError):
+            continue
+        samples.append({"timestamp": now, "provider": provider, "weeklyUsedPercent": round(used, 2)})
+    return samples
+
+
+def record_history(payload: object, timestamp: int | None = None) -> int:
+    new_samples = usage_samples(payload, timestamp)
+    if not new_samples:
+        return 0
+    now = int(timestamp or time.time())
+    cutoff = now - HISTORY_DAYS * 24 * 60 * 60
+    with HISTORY_LOCK:
+        existing = [item for item in load_history() if int(item.get("timestamp", 0)) >= cutoff]
+        for sample in new_samples:
+            last = next((item for item in reversed(existing) if item.get("provider") == sample["provider"]), None)
+            if last and now - int(last.get("timestamp", 0)) < max(60, HISTORY_INTERVAL - 5):
+                continue
+            existing.append(sample)
+        existing.sort(key=lambda item: int(item.get("timestamp", 0)))
+        write_history(existing)
+        with BACKGROUND_LOCK:
+            BACKGROUND_STATUS["sampleCount"] = len(existing)
+    return len(new_samples)
+
+
+def claude_auth_keepalive() -> bool | None:
+    """Let the official Claude CLI refresh its own OAuth file without using quota."""
+    if not auth_status().get("claude", {}).get("ok"):
+        return None
+    try:
+        proc = subprocess.run(
+            ["claude", "auth", "status", "--json"],
+            env=provider_environment(),
+            text=True,
+            capture_output=True,
+            timeout=45,
+        )
+        return proc.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def collect_background_sample(attempt: int | None = None) -> int:
+    attempt = int(attempt or time.time())
+    with BACKGROUND_LOCK:
+        BACKGROUND_STATUS["lastAttempt"] = attempt
+    claude_ok = claude_auth_keepalive()
+    status, body, _ = proxy_get("/usage?provider=both", timeout=90)
+    if not 200 <= status < 300:
+        raise RuntimeError(f"CodexBar usage returned HTTP {status}")
+    payload = json.loads(body.decode("utf-8"))
+    count = record_history(payload, attempt)
+    if count == 0:
+        raise RuntimeError("usage response contained no weekly quota samples")
+    with BACKGROUND_LOCK:
+        BACKGROUND_STATUS.update({
+            "lastSuccess": attempt,
+            "lastError": None,
+            "claudeAuthOk": claude_ok,
+            "sampleCount": len(load_history()),
+        })
+    activity_log("sample", f"recorded {count} provider samples", claudeAuthOk=claude_ok)
+    return count
+
+
+def background_collector() -> None:
+    with BACKGROUND_LOCK:
+        BACKGROUND_STATUS["running"] = True
+        BACKGROUND_STATUS["sampleCount"] = len(load_history())
+    activity_log("collector", f"started; sampling every {HISTORY_INTERVAL} seconds")
+    while True:
+        try:
+            collect_background_sample()
+        except Exception as exc:  # noqa: BLE001 - persisted diagnostic, no credentials
+            error = str(exc)[:300]
+            with BACKGROUND_LOCK:
+                BACKGROUND_STATUS["lastError"] = error
+            activity_log("error", error)
+        time.sleep(HISTORY_INTERVAL)
+
+
 class LoginSession:
     """Runs a provider login CLI on a PTY and exposes its state to the UI.
 
@@ -257,12 +450,7 @@ class LoginSession:
         self.thread.start()
 
     def _env(self) -> dict[str, str]:
-        env = os.environ.copy()
-        env["HOME"] = str(CONFIG_HOME)
-        env["XDG_CONFIG_HOME"] = str(CONFIG_HOME / "xdg")
-        env["CODEXBAR_CONFIG"] = str(CONFIG_PATH)
-        env["CODEXBAR_HOME"] = str(CONFIG_HOME)
-        env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+        env = provider_environment()
         env["TERM"] = "xterm-256color"
         return env
 
@@ -545,6 +733,18 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json(session.status())
             return
+        if path == "/api/history":
+            cutoff = int(time.time()) - HISTORY_DAYS * 24 * 60 * 60
+            with HISTORY_LOCK:
+                samples = [item for item in load_history() if int(item.get("timestamp", 0)) >= cutoff]
+            self.send_json({"days": HISTORY_DAYS, "intervalSeconds": HISTORY_INTERVAL, "samples": samples})
+            return
+        if path == "/api/background-status":
+            with BACKGROUND_LOCK:
+                status_payload = dict(BACKGROUND_STATUS)
+            status_payload["recentActivity"] = read_activity_log()
+            self.send_json(status_payload)
+            return
         if path == "/api/validate":
             ok, msg = validate_config(read_config())
             payload = {"ok": ok, "message": msg, "codexbar": run_codexbar_validate()}
@@ -653,6 +853,8 @@ def main() -> None:
     port = int(os.environ.get("CODEXBAR_SETUP_PORT", "8099"))
     ensure_auth_dirs()
     ensure_basic_config()
+    collector = threading.Thread(target=background_collector, name="usage-history", daemon=True)
+    collector.start()
     httpd = ThreadingHTTPServer((host, port), Handler)
     httpd.daemon_threads = True
     print(f"CodexBar setup UI listening on http://{host}:{port}", flush=True)

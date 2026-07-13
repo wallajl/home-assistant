@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- Add one combined seven-day trend graph for Codex and Claude weekly quota usage.
+- Collect five-minute samples in the background even when the Home Assistant panel is closed.
+- Keep a bounded local activity log and seven days of persistent history under protected add-on storage.
+- Run a quota-free Claude CLI authentication check before each sample so the official CLI can refresh its own OAuth credentials.
+
 ## 0.4.1
 
 - Open on a clean usage dashboard by default.

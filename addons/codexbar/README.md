@@ -2,6 +2,8 @@
 
 A focused Home Assistant Ingress add-on that shows OpenAI Codex and Claude subscription usage together using CodexBar.
 
+It maintains one persistent combined seven-day usage graph. Samples are collected every five minutes in the background, so the Home Assistant panel does not need to remain open.
+
 Login happens entirely from the sidebar panel:
 
 - Codex displays the official browser URL and one-time device code.

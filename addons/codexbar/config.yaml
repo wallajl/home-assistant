@@ -1,5 +1,5 @@
 name: "CodexBar"
-version: "0.4.1"
+version: "0.5.0"
 slug: "codexbar"
 description: "OpenAI Codex and Claude subscription usage in one Home Assistant panel"
 url: "https://github.com/wallajl/home-assistant"
@@ -24,10 +24,12 @@ map:
 options:
   codexbar_version: "0.41.0"
   refresh_interval: 60
+  history_interval: 300
   request_timeout: 30
   log_level: "info"
 schema:
-  codexbar_version: "str"
-  refresh_interval: "int(0,3600)"
-  request_timeout: "int(0,300)"
+  codexbar_version: str
+  refresh_interval: int(0,3600)
+  history_interval: int(60,3600)
+  request_timeout: int(5,120)
   log_level: "list(trace|verbose|debug|info|warning|error|critical)"

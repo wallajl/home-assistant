@@ -4,10 +4,13 @@ configuration:
     description: Upstream CodexBar CLI release version, without the leading v.
   refresh_interval:
     name: Refresh interval
-    description: Usage response cache time in seconds. Set 0 to disable caching.
+    description: Seconds between CodexBar's internal provider refreshes. Use 0 to refresh on every request.
+  history_interval:
+    name: History sampling interval
+    description: Seconds between background Codex and Claude trend samples. Defaults to five minutes.
   request_timeout:
     name: Request timeout
-    description: Provider request timeout in seconds. Set 0 to wait indefinitely.
+    description: Provider request timeout in seconds.
   log_level:
     name: Log level
     description: CodexBar CLI log verbosity.
