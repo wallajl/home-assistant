@@ -9,15 +9,15 @@ This focused Home Assistant add-on shows **OpenAI Codex** and **Claude** subscri
 1. Install and start the add-on.
 2. Enable **Show in sidebar** on the add-on page if Home Assistant has not added it automatically.
 3. Open **CodexBar** from the Home Assistant sidebar.
-4. Click **Log in to Codex**:
+4. Open **Settings**, then click **Log in to Codex**:
    - the add-on runs `codex login --device-auth` inside its container;
    - the panel displays `https://auth.openai.com/codex/device` and a one-time code;
    - open the link and enter the displayed code.
-5. Click **Log in to Claude**:
+5. From **Settings**, click **Log in to Claude**:
    - the add-on runs `claude auth login --claudeai` inside its container;
    - the panel displays the Claude authorization URL;
    - complete login and, if Claude returns a code, paste it into the panel.
-6. Press **Refresh usage**.
+6. Return to **Dashboard** and press **Refresh usage**.
 
 The official CLIs save credentials directly into persistent add-on storage:
 

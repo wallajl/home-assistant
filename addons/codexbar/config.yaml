@@ -1,5 +1,5 @@
 name: "CodexBar"
-version: "0.4.0"
+version: "0.4.1"
 slug: "codexbar"
 description: "OpenAI Codex and Claude subscription usage in one Home Assistant panel"
 url: "https://github.com/wallajl/home-assistant"

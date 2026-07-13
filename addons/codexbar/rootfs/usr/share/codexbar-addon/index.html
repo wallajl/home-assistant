@@ -20,6 +20,8 @@
     .warn { border-color:color-mix(in srgb,var(--warn) 55%,var(--line)) }
     .error { border-color:color-mix(in srgb,var(--bad) 65%,var(--line)) }
     .row { display:flex; flex-wrap:wrap; align-items:center; gap:8px }
+    .tabs { display:flex; gap:8px; margin:0 0 14px }
+    .tabs button.active { border-color:var(--ok); background:var(--soft); box-shadow:inset 0 0 0 1px var(--ok) }
     button,a.button,input { border:1px solid #334155; border-radius:12px; padding:10px 13px; font:inherit }
     button,a.button { cursor:pointer; color:var(--fg); background:#161622; font-weight:750; text-decoration:none }
     button.primary,a.button.primary { border:0; color:#04110f; background:linear-gradient(135deg,var(--ok),var(--blue)) }
@@ -46,9 +48,17 @@
     <div class="row"><button id="refresh">Refresh usage</button></div>
   </header>
 
+  <nav class="tabs">
+    <button id="showDashboard" class="active">Dashboard</button>
+    <button id="showSettings">Settings</button>
+  </nav>
+
   <section id="message" class="card muted">Starting…</section>
 
-  <section class="grid">
+  <section id="settingsPage" class="hidden">
+    <h2>Account settings</h2>
+    <p class="muted">Connect or reconnect the two subscription accounts used by this add-on.</p>
+    <section class="grid">
     <article id="codexAuth" class="card warn">
       <h3>OpenAI Codex</h3>
       <p class="muted">ChatGPT subscription usage through the official device-code login.</p>
@@ -61,9 +71,9 @@
       <p id="claudeStatus">Checking login…</p>
       <button id="loginClaude" class="primary">Log in to Claude</button>
     </article>
-  </section>
+    </section>
 
-  <section id="loginPanel" class="card login-panel hidden">
+    <section id="loginPanel" class="card login-panel hidden">
     <h3 id="loginTitle">Login</h3>
     <p id="loginHint" class="muted">Waiting for the provider CLI…</p>
     <div id="loginCode" class="code hidden"></div>
@@ -75,15 +85,18 @@
     </div>
     <div class="row" style="margin-top:10px"><button id="cancelLogin">Cancel login</button></div>
     <details style="margin-top:12px"><summary class="muted">Login details</summary><pre id="loginOutput">No output yet.</pre></details>
+    </section>
+
+    <details class="card" style="margin-top:20px"><summary>Diagnostics</summary><pre id="diagnostics">No diagnostics yet.</pre></details>
   </section>
 
-  <h2>Usage</h2>
-  <section id="usage" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
+  <section id="dashboardPage">
+    <h2>Usage</h2>
+    <section id="usage" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
 
-  <h2>Cost</h2>
-  <section id="cost" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
-
-  <details class="card" style="margin-top:20px"><summary>Diagnostics</summary><pre id="diagnostics">No diagnostics yet.</pre></details>
+    <h2>Cost</h2>
+    <section id="cost" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -208,6 +221,18 @@ async function refreshUsage(){
   }catch(error){ message(`Usage refresh failed: ${error.message}`,'error'); diagnostic('Usage refresh failed',error.data||error.message); }
 }
 
+function showPage(page){
+  const settings=page==='settings';
+  $('settingsPage').classList.toggle('hidden',!settings);
+  $('dashboardPage').classList.toggle('hidden',settings);
+  $('showSettings').classList.toggle('active',settings);
+  $('showDashboard').classList.toggle('active',!settings);
+  $('refresh').classList.toggle('hidden',settings);
+  if(settings) loadAuth();
+}
+
+$('showDashboard').addEventListener('click',()=>showPage('dashboard'));
+$('showSettings').addEventListener('click',()=>showPage('settings'));
 $('loginCodex').addEventListener('click',()=>startLogin('codex'));
 $('loginClaude').addEventListener('click',()=>startLogin('claude'));
 $('sendLoginInput').addEventListener('click',sendLoginInput);

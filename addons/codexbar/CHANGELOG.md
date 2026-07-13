@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Open on a clean usage dashboard by default.
+- Move Codex/Claude login status, reconnect controls, login flow, and diagnostics into a separate Settings page.
+
 ## 0.4.0
 
 - Reset the add-on to a focused Codex + Claude experience.
