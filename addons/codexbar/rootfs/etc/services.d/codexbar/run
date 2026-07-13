@@ -17,11 +17,24 @@ chmod 700 /config/codexbar /config/.codex /config/.claude || true
 # Swift's FileManager.homeDirectoryForCurrentUser resolves /root from passwd
 # even when HOME=/config. Keep the official CLI files in persistent /config,
 # but expose them at the path CodexBar's Swift credential readers use.
+root_base="${CODEXBAR_ROOT_HOME:-/root}"
+persistent_base="${CODEXBAR_PERSISTENT_HOME:-/config}"
 for provider_home in .codex .claude; do
-    if [[ -e "/root/${provider_home}" && ! -L "/root/${provider_home}" ]]; then
-        rm -rf "/root/${provider_home}"
+    root_path="${root_base}/${provider_home}"
+    persistent_path="${persistent_base}/${provider_home}"
+    if [[ -L "${root_path}" && "$(readlink "${root_path}")" == "${persistent_path}" ]]; then
+        continue
     fi
-    ln -sfn "/config/${provider_home}" "/root/${provider_home}"
+    if [[ -e "${root_path}" || -L "${root_path}" ]]; then
+        backup_path="${root_path}.pre-codexbar"
+        if [[ -e "${backup_path}" || -L "${backup_path}" ]]; then
+            bashio::log.fatal "Cannot preserve unexpected ${root_path}; ${backup_path} already exists"
+            exit 1
+        fi
+        bashio::log.warning "Moving unexpected ${root_path} to ${backup_path} before linking persistent storage"
+        mv "${root_path}" "${backup_path}"
+    fi
+    ln -s "${persistent_path}" "${root_path}"
 done
 
 if [[ ! -x /usr/local/bin/codexbar || ! -f /usr/local/share/codexbar/VERSION || "$(cat /usr/local/share/codexbar/VERSION)" != "${VERSION}" ]]; then

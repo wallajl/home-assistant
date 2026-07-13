@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2
+
+- Add an accessible 1-day / 7-day selector to the combined Codex and Claude subscription-usage trend while retaining the full seven-day local history.
+- Remove the misleading empty local-log cost cards from the OAuth subscription dashboard.
+- Align background and Ingress timeouts and serialize provider usage reads with a bounded total request deadline.
+- Prune and validate persisted history even during provider outages, quarantine malformed history, and reject materially future-dated samples.
+- Prevent overlapping or duplicate startup browser refreshes and report the configured sampling interval accurately.
+- Improve startup retries, durable config/history writes, recursive diagnostic redaction, per-provider failure visibility, Claude CLI coordination, and credential-home migration safety.
+- Add automated regression coverage for trend-range behavior, startup scheduling, retention, duplicate suppression, timeout alignment, refresh serialization, redaction, persistence recovery, symlink migration, and OAuth defaults.
+- Replace obsolete Supervisor watchdog metadata with a container health check and remove default-valued metadata.
+
 ## 0.5.1
 
 - Fix CodexBar's Linux credential discovery by linking its passwd-derived `/root` home paths to persistent `/config` OAuth storage.

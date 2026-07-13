@@ -22,6 +22,11 @@
     .row { display:flex; flex-wrap:wrap; align-items:center; gap:8px }
     .tabs { display:flex; gap:8px; margin:0 0 14px }
     .tabs button.active { border-color:var(--ok); background:var(--soft); box-shadow:inset 0 0 0 1px var(--ok) }
+    .trend-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:26px 0 12px }
+    .trend-head h2 { margin:0 }
+    .range-toggle { display:inline-flex; padding:3px; gap:3px; border:1px solid var(--line); border-radius:13px; background:#0d0d12 }
+    .range-toggle button { min-width:66px; padding:7px 12px; border:0; background:transparent }
+    .range-toggle button.active { color:#04110f; background:linear-gradient(135deg,var(--ok),var(--blue)); box-shadow:0 4px 14px #0005 }
     button,a.button,input { border:1px solid #334155; border-radius:12px; padding:10px 13px; font:inherit }
     button,a.button { cursor:pointer; color:var(--fg); background:#161622; font-weight:750; text-decoration:none }
     button.primary,a.button.primary { border:0; color:#04110f; background:linear-gradient(135deg,var(--ok),var(--blue)) }
@@ -48,7 +53,7 @@
     .trend-dot-claude { fill:var(--ok) }
     .legend { display:flex; gap:18px; flex-wrap:wrap; margin-bottom:10px }
     .legend span::before { content:''; display:inline-block; width:22px; height:3px; margin:0 7px 3px 0; border-radius:2px; background:var(--legend) }
-    @media(max-width:640px){ header{align-items:stretch;display:grid} header .row button{flex:1} }
+    @media(max-width:640px){ header{align-items:stretch;display:grid} header .row button{flex:1} .trend-head{align-items:stretch;display:grid}.range-toggle{width:100%}.range-toggle button{flex:1} }
   </style>
 </head>
 <body>
@@ -100,24 +105,27 @@
     <article class="card" style="margin-top:20px">
       <h3>Background collection</h3>
       <p id="backgroundStatus" class="muted">Checking collector…</p>
-      <p class="muted">The add-on samples Codex and Claude every five minutes, keeps seven days of local history, and lets the official Claude CLI refresh its own authentication without spending usage quota.</p>
+      <p id="backgroundDetail" class="muted">The add-on samples Codex and Claude on the configured interval, keeps seven days of local history, and lets the official Claude CLI refresh its own authentication without spending usage quota.</p>
     </article>
     <details class="card" style="margin-top:20px"><summary>Diagnostics</summary><pre id="diagnostics">No diagnostics yet.</pre></details>
   </section>
 
   <section id="dashboardPage">
-    <h2>7-day usage trend</h2>
+    <div class="trend-head">
+      <h2 id="trendHeading">7-day usage trend</h2>
+      <div class="range-toggle" role="group" aria-label="Trend time range">
+        <button id="showTrend1d" type="button" aria-pressed="false">1 day</button>
+        <button id="showTrend7d" type="button" class="active" aria-pressed="true">7 days</button>
+      </div>
+    </div>
     <section class="card">
       <div class="legend"><span style="--legend:var(--blue)">Codex weekly quota used</span><span style="--legend:var(--ok)">Claude weekly quota used</span></div>
-      <div class="trend-wrap"><svg id="trendChart" class="trend-chart" viewBox="0 0 900 280" role="img" aria-label="Seven-day Codex and Claude weekly quota usage trend"></svg></div>
+      <div class="trend-wrap"><svg id="trendChart" class="trend-chart" viewBox="0 0 900 280" role="img" aria-label="7-day Codex and Claude weekly quota usage trend"></svg></div>
       <p id="trendNote" class="muted">Collecting the first background sample…</p>
     </section>
 
     <h2>Usage</h2>
     <section id="usage" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
-
-    <h2>Cost</h2>
-    <section id="cost" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
   </section>
 </main>
 <script>
@@ -126,6 +134,11 @@ const esc = value => String(value ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<'
 const apiUrl = path => new URL(path, document.baseURI).toString();
 let activeLoginId = null;
 let loginTimer = null;
+let refreshPromise = null;
+let refreshTimer = null;
+let dashboardRefreshMs = 300000;
+let trendRangeDays = 7;
+let latestHistory = null;
 
 function message(text, kind='muted') { $('message').className=`card ${kind}`; $('message').textContent=text; }
 function diagnostic(label, value) { $('diagnostics').textContent=`${label}\n${typeof value==='string'?value:JSON.stringify(value,null,2)}`; }
@@ -214,6 +227,14 @@ const arr=value=>Array.isArray(value)?value:[value];
 const name=p=>(p.provider||p.providerID||'provider').replaceAll('_',' ');
 const date=value=>value?new Date(value).toLocaleString():'—';
 const percent=value=>Number.isFinite(Number(value))?Math.max(0,Math.min(100,Number(value))):0;
+function intervalText(seconds,compound=false){
+  const value=Math.max(1,Math.round(Number(seconds)||300));
+  if(value%60===0){
+    const minutes=value/60;
+    return compound?`${minutes}-minute`:`${minutes} minute${minutes===1?'':'s'}`;
+  }
+  return compound?`${value}-second`:`${value} seconds`;
+}
 function windowRows(label,win){
   if(!win)return'';
   const used=Number(win.usedPercent), remaining=Number.isFinite(used)?100-used:Number(win.remainingPercent), shown=Number.isFinite(remaining)?remaining:0;
@@ -224,24 +245,38 @@ function usageCard(p){
   const usage=p.usage||{}, identity=usage.identity||{};
   return `<article class="card"><h3>${esc(name(p))} <span class="pill">${esc(p.source||'auto')}</span></h3><dl>${windowRows('Session',usage.primary)}${windowRows('Weekly',usage.secondary)}${windowRows('Monthly',usage.tertiary)}<dt>Account</dt><dd>${esc(usage.accountEmail||identity.accountEmail||p.account||'—')}</dd><dt>Updated</dt><dd>${date(usage.updatedAt||p.updatedAt)}</dd></dl></article>`;
 }
-function costCard(p){
-  if(p.error)return`<article class="card error"><h3>${esc(name(p))}</h3><p>${esc(p.error.message||JSON.stringify(p.error))}</p></article>`;
-  const totals=p.totals||{};
-  const usd=value=>Number.isFinite(Number(value))?'$'+Number(value).toFixed(2):'—';
-  return `<article class="card"><h3>${esc(name(p))}</h3><dl><dt>Session</dt><dd>${usd(p.sessionCostUSD)}</dd><dt>Last 30 days</dt><dd>${usd(p.last30DaysCostUSD??totals.totalCost)}</dd><dt>Tokens</dt><dd>${Number(totals.totalTokens||p.last30DaysTokens||0).toLocaleString()}</dd></dl></article>`;
+function trendTickLabel(timestamp,rangeDays){
+  const value=new Date(timestamp*1000);
+  return rangeDays===1
+    ?value.toLocaleTimeString(undefined,{hour:'numeric'})
+    :value.toLocaleDateString(undefined,{weekday:'short'});
+}
+
+function setTrendRange(days){
+  trendRangeDays=days===1?1:7;
+  const oneDay=trendRangeDays===1;
+  $('showTrend1d').classList.toggle('active',oneDay);
+  $('showTrend7d').classList.toggle('active',!oneDay);
+  $('showTrend1d').setAttribute('aria-pressed',String(oneDay));
+  $('showTrend7d').setAttribute('aria-pressed',String(!oneDay));
+  $('trendHeading').textContent=`${trendRangeDays}-day usage trend`;
+  $('trendChart').setAttribute('aria-label',`${trendRangeDays}-day Codex and Claude weekly quota usage trend`);
+  if(latestHistory)renderHistory(latestHistory);
 }
 
 function renderHistory(data){
+  latestHistory=data;
   const svg=$('trendChart'), note=$('trendNote'), samples=Array.isArray(data.samples)?data.samples:[];
-  const now=Date.now()/1000, start=now-7*86400, W=900,H=280,L=52,R=18,T=16,B=36;
+  const rangeDays=trendRangeDays, now=Date.now()/1000, start=now-rangeDays*86400, W=900,H=280,L=52,R=18,T=16,B=36;
   const x=t=>L+(Math.max(start,Math.min(now,t))-start)/(now-start)*(W-L-R);
   const y=v=>T+(100-Math.max(0,Math.min(100,v)))/100*(H-T-B);
   let markup='';
   for(const pct of [0,25,50,75,100]){
     const yy=y(pct); markup+=`<line class="trend-grid" x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}"/><text class="trend-label" x="${L-8}" y="${yy+4}" text-anchor="end">${pct}%</text>`;
   }
-  for(let day=0;day<=7;day++){
-    const ts=start+day*86400,xx=x(ts); markup+=`<line class="trend-grid" x1="${xx}" y1="${T}" x2="${xx}" y2="${H-B}"/><text class="trend-label" x="${xx}" y="${H-12}" text-anchor="middle">${new Date(ts*1000).toLocaleDateString(undefined,{weekday:'short'})}</text>`;
+  const divisions=rangeDays===1?6:7;
+  for(let step=0;step<=divisions;step++){
+    const ts=start+step*(now-start)/divisions,xx=x(ts); markup+=`<line class="trend-grid" x1="${xx}" y1="${T}" x2="${xx}" y2="${H-B}"/><text class="trend-label" x="${xx}" y="${H-12}" text-anchor="middle">${trendTickLabel(ts,rangeDays)}</text>`;
   }
   let plotted=0;
   for(const provider of ['codex','claude']){
@@ -253,8 +288,8 @@ function renderHistory(data){
     for(const [xx,yy] of coords) markup+=`<circle class="trend-dot-${provider}" cx="${xx}" cy="${yy}" r="${coords.length===1?5:2.5}"/>`;
   }
   svg.innerHTML=markup;
-  const minutes=Math.round((data.intervalSeconds||300)/60);
-  note.textContent=plotted?`${plotted} samples retained locally · background sampling every ${minutes} minutes · lines may drop when weekly quotas reset.`:`No history yet. The background collector will add the first points without this page being open.`;
+  const interval=intervalText(data.intervalSeconds||300);
+  note.textContent=plotted?`${plotted} visible points · ${samples.length} retained over seven days · background sampling every ${interval} · lines may drop when weekly quotas reset.`:(samples.length?`No samples fall within the selected ${rangeDays}-day range.`:`No history yet. The background collector will add the first points without this page being open.`);
 }
 
 async function loadHistory(){
@@ -265,22 +300,42 @@ async function loadHistory(){
 async function loadBackground(){
   try{
     const data=await api('api/background-status');
+    dashboardRefreshMs=Math.max(60000,Number(data.intervalSeconds||300)*1000);
+    const interval=intervalText(data.intervalSeconds||300);
+    const compoundInterval=intervalText(data.intervalSeconds||300,true);
     const last=data.lastSuccess?new Date(data.lastSuccess*1000).toLocaleString():'not yet';
-    $('backgroundStatus').textContent=`${data.running?'Running':'Stopped'} · ${Math.round(data.intervalSeconds/60)} minute interval · last successful sample ${last} · ${data.sampleCount||0} retained points${data.claudeAuthOk===false?' · Claude authentication check needs attention':''}.`;
+    const providerWarnings=Object.entries(data.providerStatus||{}).filter(([,status])=>status&&status.ok===false).map(([provider])=>provider==='codex'?'Codex':'Claude');
+    const warningText=providerWarnings.length?` · provider issues: ${providerWarnings.join(', ')}`:(data.claudeAuthOk===false?' · Claude authentication check needs attention':'');
+    $('backgroundStatus').textContent=`${data.running?'Running':'Stopped'} · ${compoundInterval} interval · last successful sample ${last} · ${data.sampleCount||0} retained points${warningText}.`;
+    $('backgroundDetail').textContent=`The add-on samples Codex and Claude every ${interval}, keeps seven days of local history, and lets the official Claude CLI refresh its own authentication without spending usage quota.`;
   }catch(error){ $('backgroundStatus').textContent=`Collector status unavailable: ${error.message}`; }
 }
 
+function scheduleRefresh(){
+  if(refreshTimer)clearTimeout(refreshTimer);
+  refreshTimer=setTimeout(()=>refreshUsage(),dashboardRefreshMs);
+}
+
 async function refreshUsage(){
-  message('Refreshing Codex and Claude usage…');
-  try{
-    const [health,usage,cost]=await Promise.all([api('health'),api('usage?provider=both'),api('cost?provider=both')]);
-    const backendOk=health.backendStatus>=200&&health.backendStatus<300;
-    $('usage').innerHTML=arr(usage).map(usageCard).join('')||'<article class="card muted">No usage data.</article>';
-    $('cost').innerHTML=arr(cost).map(costCard).join('')||'<article class="card muted">No cost data.</article>';
-    message(backendOk?`Updated ${new Date().toLocaleTimeString()}${health.version?` · CodexBar ${health.version}`:''}`:`CodexBar backend unavailable (HTTP ${health.backendStatus}).`,backendOk?'ok':'error');
-    diagnostic('Last dashboard response',{health,usage,cost});
-    await loadHistory();
-  }catch(error){ message(`Usage refresh failed: ${error.message}`,'error'); diagnostic('Usage refresh failed',error.data||error.message); }
+  if(refreshPromise)return refreshPromise;
+  $('refresh').disabled=true;
+  refreshPromise=(async()=>{
+    message('Refreshing Codex and Claude usage…');
+    try{
+      const [health,usage]=await Promise.all([api('health'),api('usage?provider=both')]);
+      const backendOk=health.backendStatus>=200&&health.backendStatus<300;
+      $('usage').innerHTML=arr(usage).map(usageCard).join('')||'<article class="card muted">No usage data.</article>';
+      message(backendOk?`Updated ${new Date().toLocaleTimeString()}${health.version?` · CodexBar ${health.version}`:''}`:`CodexBar backend unavailable (HTTP ${health.backendStatus}).`,backendOk?'ok':'error');
+      diagnostic('Last dashboard response',{health,usage});
+      await loadHistory();
+    }catch(error){ message(`Usage refresh failed: ${error.message}`,'error'); diagnostic('Usage refresh failed',error.data||error.message); }
+  })();
+  try{return await refreshPromise;}
+  finally{
+    refreshPromise=null;
+    $('refresh').disabled=false;
+    scheduleRefresh();
+  }
 }
 
 function showPage(page){
@@ -295,14 +350,18 @@ function showPage(page){
 
 $('showDashboard').addEventListener('click',()=>showPage('dashboard'));
 $('showSettings').addEventListener('click',()=>showPage('settings'));
+$('showTrend1d').addEventListener('click',()=>setTrendRange(1));
+$('showTrend7d').addEventListener('click',()=>setTrendRange(7));
 $('loginCodex').addEventListener('click',()=>startLogin('codex'));
 $('loginClaude').addEventListener('click',()=>startLogin('claude'));
 $('sendLoginInput').addEventListener('click',sendLoginInput);
 $('loginInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendLoginInput()}});
 $('cancelLogin').addEventListener('click',cancelLogin);
 $('refresh').addEventListener('click',refreshUsage);
-Promise.all([loadAuth(),refreshUsage(),loadHistory(),loadBackground()]).catch(error=>message(error.message,'error'));
-setInterval(refreshUsage,60000);
+(async()=>{
+  await Promise.all([loadAuth(),loadBackground()]);
+  await refreshUsage();
+})().catch(error=>message(error.message,'error'));
 </script>
 </body>
 </html>

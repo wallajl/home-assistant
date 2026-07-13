@@ -16,6 +16,7 @@ Ingress notes (things that break silently if changed):
 from __future__ import annotations
 
 import json
+import math
 import os
 import pathlib
 import re
@@ -32,6 +33,14 @@ import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+
+def env_int(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(minimum, int(os.environ.get(name) or default))
+    except ValueError:
+        return max(minimum, default)
+
+
 ROOT = pathlib.Path("/usr/share/codexbar-addon")
 CONFIG_PATH = pathlib.Path(os.environ.get("CODEXBAR_CONFIG", "/config/codexbar/config.json"))
 CONFIG_HOME = pathlib.Path(os.environ.get("CODEXBAR_HOME", "/config"))
@@ -43,10 +52,13 @@ LOGIN_LOCK = threading.Lock()
 HISTORY_PATH = CONFIG_PATH.parent / "history.json"
 ACTIVITY_LOG_PATH = CONFIG_PATH.parent / "activity.log"
 HISTORY_DAYS = 7
-HISTORY_INTERVAL = max(60, int(os.environ.get("CODEXBAR_HISTORY_INTERVAL", "300")))
-PROVIDER_TIMEOUT = max(5, int(os.environ.get("CODEXBAR_REQUEST_TIMEOUT", "90")))
+HISTORY_INTERVAL = env_int("CODEXBAR_HISTORY_INTERVAL", 300, 60)
+HISTORY_FUTURE_TOLERANCE = 5 * 60
+PROVIDER_TIMEOUT = env_int("CODEXBAR_REQUEST_TIMEOUT", 90, 5)
 PROXY_TIMEOUT = PROVIDER_TIMEOUT + 20
 HISTORY_LOCK = threading.Lock()
+USAGE_FETCH_LOCK = threading.Lock()
+CLAUDE_CLI_LOCK = threading.Lock()
 BACKGROUND_STATUS: dict[str, object] = {
     "running": False,
     "intervalSeconds": HISTORY_INTERVAL,
@@ -55,6 +67,7 @@ BACKGROUND_STATUS: dict[str, object] = {
     "lastError": None,
     "claudeAuthOk": None,
     "sampleCount": 0,
+    "providerStatus": {},
 }
 BACKGROUND_LOCK = threading.Lock()
 # OSC sequences (terminal hyperlinks/titles): ESC ] ... BEL or ESC ] ... ESC \
@@ -66,6 +79,9 @@ CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 URL_RE = re.compile(r"https?://[^\s<>\"'()\[\]{}\x00-\x20]+")
 CODE_RE = re.compile(r"(?:one-time code|device code)[^\n]*\n+\s*([A-Z0-9]{3,12}-[A-Z0-9]{3,12})", re.IGNORECASE)
 PROMPT_RE = re.compile(r"(?:paste|enter)[^\n]*(?:code|token)[^\n]*[>:]\s*$", re.IGNORECASE)
+SENSITIVE_ACTIVITY_KEY_RE = re.compile(
+    r"(?i)(?:authorization|password|secret|token|callback|(?:one[_ -]?time|device|oauth)[_ -]?code|url)"
+)
 AUTH_FILES = {
     "codex": CONFIG_HOME / ".codex/auth.json",
     "claude": CONFIG_HOME / ".claude/.credentials.json",
@@ -88,7 +104,7 @@ PROVIDER_PRESETS = [
     {
         "id": "claude",
         "name": "Claude",
-        "defaultSource": "auto",
+        "defaultSource": "oauth",
         "auth": "Claude subscription login",
         "help": "Uses the official Claude login URL and stores OAuth under /config/.claude.",
         "fields": [],
@@ -164,6 +180,17 @@ def validate_config(data: object) -> tuple[bool, str]:
     return True, "ok"
 
 
+def fsync_directory(path: pathlib.Path) -> None:
+    try:
+        directory_fd = os.open(path, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except OSError:
+        pass
+
+
 def write_config(data: dict) -> None:
     CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
     fd, temp_name = tempfile.mkstemp(prefix="config.", suffix=".json", dir=str(CONFIG_PATH.parent))
@@ -171,8 +198,11 @@ def write_config(data: dict) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(data, fh, indent=2, sort_keys=False)
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         os.chmod(temp_name, 0o600)
         os.replace(temp_name, CONFIG_PATH)
+        fsync_directory(CONFIG_PATH.parent)
     finally:
         try:
             os.unlink(temp_name)
@@ -248,13 +278,49 @@ def provider_environment() -> dict[str, str]:
     return env
 
 
+def sanitize_activity_message(value: object) -> str:
+    """Remove URLs and token-like values before diagnostics are persisted."""
+    message = str(value).replace("\r", " ").replace("\n", " ")[:300]
+    message = re.sub(r"https?://\S+", "[URL REDACTED]", message, flags=re.IGNORECASE)
+    message = re.sub(
+        r'''(?ix)\b(access[_ -]?token|refresh[_ -]?token|id[_ -]?token|authorization|client[_ -]?secret|password|(?:one[_ -]?time|device|callback|oauth)[_ -]?code|callback)\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^,;]+)''',
+        r"\1=[REDACTED]",
+        message,
+    )
+    message = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", message)
+    message = re.sub(r"\beyJ[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+){1,2}\b", "[JWT REDACTED]", message)
+    return message
+
+
+def sanitize_activity_value(value: object, key: str = "") -> object:
+    """Recursively sanitize structured diagnostics, including legacy log fields."""
+    if key and SENSITIVE_ACTIVITY_KEY_RE.search(key):
+        return "[REDACTED]"
+    if isinstance(value, dict):
+        return {
+            str(item_key): sanitize_activity_value(item_value, str(item_key))
+            for item_key, item_value in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [sanitize_activity_value(item) for item in value]
+    if isinstance(value, str):
+        return sanitize_activity_message(value)
+    if value is None or isinstance(value, (bool, int)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else str(value)
+    return sanitize_activity_message(value)
+
+
 def activity_log(event: str, message: str, **fields: object) -> None:
     """Write a bounded, secret-free activity log for background collection."""
+    safe_message = sanitize_activity_message(message)
+    safe_fields = sanitize_activity_value(fields)
     entry = {
+        **(safe_fields if isinstance(safe_fields, dict) else {}),
         "timestamp": int(time.time()),
-        "event": event,
-        "message": message,
-        **fields,
+        "event": sanitize_activity_message(event),
+        "message": safe_message,
     }
     try:
         ACTIVITY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -265,8 +331,8 @@ def activity_log(event: str, message: str, **fields: object) -> None:
             fh.write(json.dumps(entry, separators=(",", ":")) + "\n")
         os.chmod(ACTIVITY_LOG_PATH, 0o600)
     except OSError as exc:
-        print(f"WARNING: could not write activity log: {exc}", flush=True)
-    print(f"background[{event}] {message}", flush=True)
+        print(f"WARNING: could not write activity log: {sanitize_activity_message(exc)}", flush=True)
+    print(f"background[{event}] {safe_message}", flush=True)
 
 
 def read_activity_log(limit: int = 30) -> list[dict[str, object]]:
@@ -280,20 +346,72 @@ def read_activity_log(limit: int = 30) -> list[dict[str, object]]:
             except json.JSONDecodeError:
                 continue
             if isinstance(item, dict):
-                entries.append(item)
+                sanitized = sanitize_activity_value(item)
+                if isinstance(sanitized, dict):
+                    entries.append(sanitized)
     except OSError:
         return []
     return entries
 
 
-def load_history() -> list[dict[str, object]]:
+def normalize_history_item(
+    item: object,
+    maximum_timestamp: int | None = None,
+) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    provider = str(item.get("provider", "")).lower()
+    if provider not in PROVIDER_IDS:
+        return None
+    try:
+        timestamp = int(item["timestamp"])
+        used = float(item["weeklyUsedPercent"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+    if timestamp <= 0 or (maximum_timestamp is not None and timestamp > maximum_timestamp):
+        return None
+    if not math.isfinite(used) or not 0 <= used <= 100:
+        return None
+    return {"timestamp": timestamp, "provider": provider, "weeklyUsedPercent": round(used, 2)}
+
+
+def quarantine_history() -> pathlib.Path | None:
+    """Preserve an unreadable history file before starting a clean one."""
+    if not HISTORY_PATH.exists():
+        return None
+    destination = HISTORY_PATH.with_name(
+        f"{HISTORY_PATH.stem}.corrupt-{int(time.time())}-{uuid.uuid4().hex[:8]}{HISTORY_PATH.suffix}"
+    )
+    try:
+        os.replace(HISTORY_PATH, destination)
+        os.chmod(destination, 0o600)
+        fsync_directory(HISTORY_PATH.parent)
+        print(f"WARNING: quarantined malformed history as {destination.name}", flush=True)
+        return destination
+    except OSError as exc:
+        print(f"WARNING: could not quarantine malformed history: {sanitize_activity_message(exc)}", flush=True)
+        return None
+
+
+def load_history(reference_time: int | None = None) -> list[dict[str, object]]:
     if not HISTORY_PATH.exists():
         return []
     try:
         data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
-        return [item for item in data if isinstance(item, dict)] if isinstance(data, list) else []
-    except (OSError, json.JSONDecodeError):
+    except OSError:
         return []
+    except json.JSONDecodeError:
+        quarantine_history()
+        return []
+    if not isinstance(data, list):
+        quarantine_history()
+        return []
+    maximum_timestamp = int(reference_time or time.time()) + HISTORY_FUTURE_TOLERANCE
+    return [
+        normalized
+        for item in data
+        if (normalized := normalize_history_item(item, maximum_timestamp)) is not None
+    ]
 
 
 def write_history(samples: list[dict[str, object]]) -> None:
@@ -303,8 +421,11 @@ def write_history(samples: list[dict[str, object]]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(samples, fh, separators=(",", ":"))
             fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
         os.chmod(temp_name, 0o600)
         os.replace(temp_name, HISTORY_PATH)
+        fsync_directory(HISTORY_PATH.parent)
     finally:
         try:
             os.unlink(temp_name)
@@ -332,37 +453,72 @@ def usage_samples(payload: object, timestamp: int | None = None) -> list[dict[st
                 raw_used = 100 - float(weekly["remainingPercent"])
             except (TypeError, ValueError):
                 raw_used = None
+        if raw_used is None:
+            continue
         try:
-            used = max(0.0, min(100.0, float(raw_used)))
+            used = float(raw_used)
         except (TypeError, ValueError):
             continue
+        if not math.isfinite(used):
+            continue
+        used = max(0.0, min(100.0, used))
         samples.append({"timestamp": now, "provider": provider, "weeklyUsedPercent": round(used, 2)})
     return samples
 
 
+def provider_sample_status(payload: object, timestamp: int | None = None) -> dict[str, dict[str, object]]:
+    providers = payload if isinstance(payload, list) else [payload]
+    status = {
+        provider: {"ok": False, "error": "provider missing from usage response"}
+        for provider in sorted(PROVIDER_IDS)
+    }
+    for item in providers:
+        if not isinstance(item, dict):
+            continue
+        provider = str(item.get("provider") or item.get("providerID") or "").lower()
+        if provider not in PROVIDER_IDS:
+            continue
+        error = item.get("error")
+        if error:
+            if isinstance(error, dict):
+                detail = error.get("message") or error.get("kind") or "provider error"
+            else:
+                detail = error
+            status[provider] = {"ok": False, "error": sanitize_activity_message(detail)}
+        elif usage_samples(item, timestamp):
+            status[provider] = {"ok": True, "error": None}
+        else:
+            status[provider] = {"ok": False, "error": "weekly quota unavailable"}
+    return status
+
+
 def record_history(payload: object, timestamp: int | None = None) -> int:
-    new_samples = usage_samples(payload, timestamp)
-    if not new_samples:
-        return 0
+    """Prune retained history and return the number of newly appended points."""
     now = int(timestamp or time.time())
     cutoff = now - HISTORY_DAYS * 24 * 60 * 60
+    new_samples = usage_samples(payload, now)
+    appended = 0
     with HISTORY_LOCK:
-        existing = [item for item in load_history() if int(item.get("timestamp", 0)) >= cutoff]
+        existing = [item for item in load_history(now) if cutoff <= int(str(item["timestamp"])) <= now]
         for sample in new_samples:
-            last = next((item for item in reversed(existing) if item.get("provider") == sample["provider"]), None)
-            if last and now - int(last.get("timestamp", 0)) < max(60, HISTORY_INTERVAL - 5):
+            provider_items = [item for item in existing if item["provider"] == sample["provider"]]
+            last = max(provider_items, key=lambda item: int(str(item["timestamp"])), default=None)
+            if last and now - int(str(last["timestamp"])) < max(60, HISTORY_INTERVAL - 5):
                 continue
             existing.append(sample)
-        existing.sort(key=lambda item: int(item.get("timestamp", 0)))
+            appended += 1
+        existing.sort(key=lambda item: int(str(item["timestamp"])))
         write_history(existing)
         with BACKGROUND_LOCK:
             BACKGROUND_STATUS["sampleCount"] = len(existing)
-    return len(new_samples)
+    return appended
 
 
 def claude_auth_keepalive() -> bool | None:
     """Let the official Claude CLI refresh its own OAuth file without using quota."""
     if not auth_status().get("claude", {}).get("ok"):
+        return None
+    if not CLAUDE_CLI_LOCK.acquire(blocking=False):
         return None
     try:
         proc = subprocess.run(
@@ -375,45 +531,86 @@ def claude_auth_keepalive() -> bool | None:
         return proc.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
+    finally:
+        CLAUDE_CLI_LOCK.release()
 
 
 def collect_background_sample(attempt: int | None = None) -> int:
     attempt = int(attempt or time.time())
     with BACKGROUND_LOCK:
         BACKGROUND_STATUS["lastAttempt"] = attempt
-    claude_ok = claude_auth_keepalive()
-    status, body, _ = proxy_get("/usage?provider=both", timeout=90)
-    if not 200 <= status < 300:
-        raise RuntimeError(f"CodexBar usage returned HTTP {status}")
-    payload = json.loads(body.decode("utf-8"))
-    count = record_history(payload, attempt)
-    if count == 0:
-        raise RuntimeError("usage response contained no weekly quota samples")
+    try:
+        claude_ok = claude_auth_keepalive()
+        status, body, _ = proxy_get("/usage?provider=both", timeout=PROXY_TIMEOUT)
+        if not 200 <= status < 300:
+            raise RuntimeError(f"CodexBar usage returned HTTP {status}")
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        # Retention must continue even when the backend is unavailable or malformed.
+        record_history([], attempt)
+        raise
+    provider_status = provider_sample_status(payload, attempt)
+    valid_count = sum(1 for item in provider_status.values() if item["ok"])
+    appended = record_history(payload, attempt)
+    failures = [
+        f"{provider}: {item['error']}"
+        for provider, item in provider_status.items()
+        if not item["ok"]
+    ]
+    partial_error = "; ".join(failures) if failures else None
+    with BACKGROUND_LOCK:
+        BACKGROUND_STATUS["providerStatus"] = provider_status
+        BACKGROUND_STATUS["claudeAuthOk"] = claude_ok
+    if valid_count == 0:
+        raise RuntimeError(f"usage response contained no weekly quota samples ({partial_error})")
+    retained_count = len(load_history())
     with BACKGROUND_LOCK:
         BACKGROUND_STATUS.update({
             "lastSuccess": attempt,
-            "lastError": None,
-            "claudeAuthOk": claude_ok,
-            "sampleCount": len(load_history()),
+            "lastError": f"Partial sample: {partial_error}" if partial_error else None,
+            "sampleCount": retained_count,
         })
-    activity_log("sample", f"recorded {count} provider samples", claudeAuthOk=claude_ok)
-    return count
+    activity_log(
+        "partial" if partial_error else "sample",
+        f"sampled {valid_count} providers; appended {appended} history points"
+        + (f"; {partial_error}" if partial_error else ""),
+        claudeAuthOk=claude_ok,
+    )
+    return appended
 
 
 def background_collector() -> None:
+    try:
+        record_history([], int(time.time()))
+    except OSError as exc:
+        activity_log("error", f"startup history maintenance failed: {sanitize_activity_message(exc)}")
+    retained = load_history()
+    newest = max((int(str(item["timestamp"])) for item in retained), default=None)
     with BACKGROUND_LOCK:
         BACKGROUND_STATUS["running"] = True
-        BACKGROUND_STATUS["sampleCount"] = len(load_history())
+        BACKGROUND_STATUS["sampleCount"] = len(retained)
+        BACKGROUND_STATUS["lastSuccess"] = newest
+        BACKGROUND_STATUS["providerStatus"] = {}
     activity_log("collector", f"started; sampling every {HISTORY_INTERVAL} seconds")
+    startup_failures = 0
+    next_run = time.monotonic()
     while True:
+        delay = next_run - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
         try:
             collect_background_sample()
-        except Exception as exc:  # noqa: BLE001 - persisted diagnostic, no credentials
-            error = str(exc)[:300]
+        except Exception as exc:  # noqa: BLE001 - sanitized before persistence
+            error = sanitize_activity_message(exc)
             with BACKGROUND_LOCK:
                 BACKGROUND_STATUS["lastError"] = error
             activity_log("error", error)
-        time.sleep(HISTORY_INTERVAL)
+            startup_failures += 1
+            retry_delay = 15 if startup_failures <= 4 else HISTORY_INTERVAL
+            next_run = time.monotonic() + retry_delay
+        else:
+            startup_failures = 5
+            next_run = time.monotonic() + HISTORY_INTERVAL
 
 
 class LoginSession:
@@ -468,7 +665,19 @@ class LoginSession:
         self.awaiting_input = bool(PROMPT_RE.search(tail))
 
     def _run(self) -> None:
+        claude_lock_acquired = False
         try:
+            if self.provider == "claude":
+                while not self.cancelled:
+                    if CLAUDE_CLI_LOCK.acquire(timeout=0.25):
+                        claude_lock_acquired = True
+                        break
+                if not claude_lock_acquired:
+                    self.error = "Login cancelled."
+                    return
+            if self.cancelled:
+                self.error = "Login cancelled."
+                return
             ensure_auth_dirs()
             master_fd, slave_fd = os.openpty()
             with self.io_lock:
@@ -537,6 +746,8 @@ class LoginSession:
                     except OSError:
                         pass
                     self.master_fd = None
+            if claude_lock_acquired:
+                CLAUDE_CLI_LOCK.release()
             self.awaiting_input = False
             self.done = True
 
@@ -614,18 +825,38 @@ def get_login_session(session_id: str, owner: str | None = None) -> LoginSession
         return session
 
 
-def proxy_get(path: str, timeout: int | None = None) -> tuple[int, bytes, str]:
-    url = CODEXBAR_URL + path
-    req = urllib.request.Request(url, headers={"Host": "127.0.0.1:8080"})
+def proxy_get(path: str, timeout: int | float | None = None) -> tuple[int, bytes, str]:
+    request_budget = max(0.05, float(PROXY_TIMEOUT if timeout is None else timeout))
+    deadline = time.monotonic() + request_budget
+
+    def perform_request(request_timeout: float) -> tuple[int, bytes, str]:
+        url = CODEXBAR_URL + path
+        req = urllib.request.Request(url, headers={"Host": "127.0.0.1:8080"})
+        try:
+            with urllib.request.urlopen(req, timeout=request_timeout) as resp:
+                content_type = resp.headers.get("Content-Type", "application/json; charset=utf-8")
+                return resp.status, resp.read(), content_type
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read(), exc.headers.get("Content-Type", "application/json; charset=utf-8")
+        except Exception as exc:  # noqa: BLE001
+            body = json.dumps({"error": f"CodexBar API unavailable: {sanitize_activity_message(exc)}"}).encode()
+            return 502, body, "application/json; charset=utf-8"
+
+    lock_acquired = False
+    if path.startswith("/usage"):
+        lock_acquired = USAGE_FETCH_LOCK.acquire(timeout=request_budget)
+        if not lock_acquired:
+            body = json.dumps({"error": "CodexBar usage request busy; retry shortly"}).encode()
+            return 503, body, "application/json; charset=utf-8"
     try:
-        with urllib.request.urlopen(req, timeout=timeout or PROXY_TIMEOUT) as resp:
-            content_type = resp.headers.get("Content-Type", "application/json; charset=utf-8")
-            return resp.status, resp.read(), content_type
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read(), exc.headers.get("Content-Type", "application/json; charset=utf-8")
-    except Exception as exc:  # noqa: BLE001
-        body = json.dumps({"error": f"CodexBar API unavailable: {exc}"}).encode()
-        return 502, body, "application/json; charset=utf-8"
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            body = json.dumps({"error": "CodexBar request timed out while waiting for another usage fetch"}).encode()
+            return 503, body, "application/json; charset=utf-8"
+        return perform_request(max(0.01, remaining))
+    finally:
+        if lock_acquired:
+            USAGE_FETCH_LOCK.release()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -756,7 +987,7 @@ class Handler(BaseHTTPRequestHandler):
             # Watchdog endpoint: the setup UI (which serves Ingress) is healthy
             # even while the CodexBar backend is still starting, so always 200
             # and report backend state in the payload.
-            status, body, _content_type = proxy_get("/health" + query, timeout=10)
+            status, body, _content_type = proxy_get("/health" + query, timeout=2)
             payload: dict[str, object] = {"ok": True, "backendStatus": status}
             try:
                 backend = json.loads(body.decode("utf-8"))

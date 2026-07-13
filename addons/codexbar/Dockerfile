@@ -25,3 +25,6 @@ LABEL \
     io.hass.version="${BUILD_VERSION}" \
     io.hass.type="addon" \
     io.hass.arch="${BUILD_ARCH}"
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl --fail --silent http://127.0.0.1:8099/health >/dev/null || exit 1
