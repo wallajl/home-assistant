@@ -15,6 +15,7 @@ Ingress notes (things that break silently if changed):
 """
 from __future__ import annotations
 
+import http.client
 import json
 import math
 import os
@@ -23,14 +24,13 @@ import re
 import select
 import shutil
 import signal
+import socket
 import subprocess
 import tempfile
 import threading
 import time
 import uuid
-import urllib.error
 import urllib.parse
-import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -149,7 +149,7 @@ def read_config() -> dict:
             data.setdefault("version", 1)
             data.setdefault("providers", [])
             return data
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, UnicodeDecodeError):
         pass
     return {**default_config(), "_error": "Existing config is not valid JSON"}
 
@@ -211,11 +211,28 @@ def write_config(data: dict) -> None:
 
 
 def ensure_basic_config() -> None:
-    """Keep this add-on intentionally limited to Codex and Claude."""
-    wanted = default_config()
-    current = read_config()
-    if not CONFIG_PATH.exists() or current != wanted:
-        write_config(wanted)
+    """Initialize a missing config without replacing valid user settings."""
+    if not CONFIG_PATH.exists():
+        write_config(default_config())
+        return
+    if CONFIG_PATH.stat().st_size == 0:
+        current = {**default_config(), "_error": "Existing config is empty"}
+    else:
+        current = read_config()
+    valid, _message = validate_config(current)
+    if valid and "_error" not in current:
+        return
+    backup = CONFIG_PATH.parent / f"config.invalid-{time.time_ns()}.json"
+    try:
+        shutil.copy2(CONFIG_PATH, backup)
+        os.chmod(backup, 0o600)
+        with backup.open("rb") as fh:
+            os.fsync(fh.fileno())
+        fsync_directory(CONFIG_PATH.parent)
+    except OSError as exc:
+        print(f"WARNING: invalid config preserved because backup failed: {sanitize_activity_message(exc)}", flush=True)
+        return
+    write_config(default_config())
 
 
 def run_codexbar_validate() -> dict:
@@ -281,10 +298,21 @@ def provider_environment() -> dict[str, str]:
 def sanitize_activity_message(value: object) -> str:
     """Remove URLs and token-like values before diagnostics are persisted."""
     message = str(value).replace("\r", " ").replace("\n", " ")[:300]
+    message = re.sub(r'''\\+(?=["'])''', "", message)
     message = re.sub(r"https?://\S+", "[URL REDACTED]", message, flags=re.IGNORECASE)
     message = re.sub(
-        r'''(?ix)\b(access[_ -]?token|refresh[_ -]?token|id[_ -]?token|authorization|client[_ -]?secret|password|(?:one[_ -]?time|device|callback|oauth)[_ -]?code|callback)\b\s*[:=]\s*(?:"[^"]*"|'[^']*'|[^,;]+)''',
+        r'''(?ix)\bauthorization\b["']?(?:\s*[:=]\s*|\s+).*$''',
+        "authorization=[REDACTED]",
+        message,
+    )
+    message = re.sub(
+        r'''(?ix)\b(access[_ -]?token|refresh[_ -]?token|id[_ -]?token|client[_ -]?secret|password|(?:one[_ -]?time|device|callback|oauth)[_ -]?code|callback)\b["']?\s*[:=]\s*(?:bearer\s+[A-Za-z0-9._~+/=-]+|"[^"]*"|'[^']*'|[^,;}\s]+)''',
         r"\1=[REDACTED]",
+        message,
+    )
+    message = re.sub(
+        r'''(?ix)\b((?:one[_ -]?time|device|callback|oauth)[_ -]?code)\b\s+(?:(?:is|was)\s*[:=]?\s*)?["']?[A-Za-z0-9][A-Za-z0-9._~+/=-]{3,}["']?''',
+        r"\1 [REDACTED]",
         message,
     )
     message = re.sub(r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+", "Bearer [REDACTED]", message)
@@ -681,17 +709,24 @@ class LoginSession:
             ensure_auth_dirs()
             master_fd, slave_fd = os.openpty()
             with self.io_lock:
+                if self.cancelled:
+                    os.close(master_fd)
+                    os.close(slave_fd)
+                    self.error = "Login cancelled."
+                    return
                 self.master_fd = master_fd
-            self.process = subprocess.Popen(
-                self.command,
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                env=self._env(),
-                preexec_fn=os.setsid,
-                close_fds=True,
-            )
-            os.close(slave_fd)
+                try:
+                    self.process = subprocess.Popen(
+                        self.command,
+                        stdin=slave_fd,
+                        stdout=slave_fd,
+                        stderr=slave_fd,
+                        env=self._env(),
+                        preexec_fn=os.setsid,
+                        close_fds=True,
+                    )
+                finally:
+                    os.close(slave_fd)
             deadline = time.time() + LOGIN_TIMEOUT
             while time.time() < deadline:
                 if self.process.poll() is not None:
@@ -766,8 +801,9 @@ class LoginSession:
         self.awaiting_input = False
 
     def cancel(self) -> None:
-        self.cancelled = True
-        proc = self.process
+        with self.io_lock:
+            self.cancelled = True
+            proc = self.process
         if proc and proc.poll() is None:
             try:
                 os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -829,18 +865,79 @@ def proxy_get(path: str, timeout: int | float | None = None) -> tuple[int, bytes
     request_budget = max(0.05, float(PROXY_TIMEOUT if timeout is None else timeout))
     deadline = time.monotonic() + request_budget
 
+    def update_response_timeout(response: object, remaining: float) -> None:
+        pending = [response]
+        seen: set[int] = set()
+        while pending:
+            current = pending.pop()
+            identity = id(current)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            set_timeout = getattr(current, "settimeout", None)
+            if callable(set_timeout):
+                set_timeout(max(0.001, remaining))
+                return
+            for attribute in ("fp", "raw", "_sock"):
+                child = getattr(current, attribute, None)
+                if child is not None:
+                    pending.append(child)
+
+    def read_with_deadline(response: object) -> bytes:
+        chunks: list[bytes] = []
+        read_chunk = getattr(response, "read1", None) or getattr(response, "read")
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("CodexBar response exceeded the request deadline")
+            update_response_timeout(response, remaining)
+            chunk = read_chunk(64 * 1024)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+
     def perform_request(request_timeout: float) -> tuple[int, bytes, str]:
-        url = CODEXBAR_URL + path
-        req = urllib.request.Request(url, headers={"Host": "127.0.0.1:8080"})
+        endpoint = urllib.parse.urlsplit(CODEXBAR_URL)
+        if endpoint.scheme != "http" or not endpoint.hostname:
+            raise ValueError("CODEXBAR_URL must be a local HTTP endpoint")
+        target = f"{endpoint.path.rstrip('/')}{path}" or "/"
+        connection = http.client.HTTPConnection(
+            endpoint.hostname,
+            endpoint.port or 80,
+            timeout=max(0.001, request_timeout),
+        )
+        deadline_reached = threading.Event()
+
+        def abort_at_deadline() -> None:
+            deadline_reached.set()
+            sock = connection.sock
+            if sock is not None:
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+            connection.close()
+
+        watchdog = threading.Timer(max(0.001, deadline - time.monotonic()), abort_at_deadline)
+        watchdog.daemon = True
+        watchdog.start()
         try:
-            with urllib.request.urlopen(req, timeout=request_timeout) as resp:
+            connection.request("GET", target, headers={"Host": "127.0.0.1:8080"})
+            with connection.getresponse() as resp:
                 content_type = resp.headers.get("Content-Type", "application/json; charset=utf-8")
-                return resp.status, resp.read(), content_type
-        except urllib.error.HTTPError as exc:
-            return exc.code, exc.read(), exc.headers.get("Content-Type", "application/json; charset=utf-8")
+                return resp.status, read_with_deadline(resp), content_type
+        except (TimeoutError, socket.timeout, OSError, http.client.HTTPException) as exc:
+            if deadline_reached.is_set() or time.monotonic() >= deadline:
+                body = json.dumps({"error": "CodexBar response exceeded the request deadline"}).encode()
+                return 504, body, "application/json; charset=utf-8"
+            body = json.dumps({"error": f"CodexBar API unavailable: {sanitize_activity_message(exc)}"}).encode()
+            return 502, body, "application/json; charset=utf-8"
         except Exception as exc:  # noqa: BLE001
             body = json.dumps({"error": f"CodexBar API unavailable: {sanitize_activity_message(exc)}"}).encode()
             return 502, body, "application/json; charset=utf-8"
+        finally:
+            watchdog.cancel()
+            connection.close()
 
     lock_acquired = False
     if path.startswith("/usage"):

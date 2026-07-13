@@ -14,8 +14,8 @@
     h1 { margin:0; font-size:clamp(32px,7vw,60px); letter-spacing:-.06em }
     h2 { margin:26px 0 12px } h3 { margin:0 0 8px }
     .muted { color:var(--muted) }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px }
-    .card { background:color-mix(in srgb,var(--card) 95%,transparent); border:1px solid var(--line); border-radius:20px; padding:18px; box-shadow:0 18px 50px #0006 }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr)); gap:14px }
+    .card { min-width:0; background:color-mix(in srgb,var(--card) 95%,transparent); border:1px solid var(--line); border-radius:20px; padding:18px; box-shadow:0 18px 50px #0006 }
     .ok { border-color:color-mix(in srgb,var(--ok) 65%,var(--line)) }
     .warn { border-color:color-mix(in srgb,var(--warn) 55%,var(--line)) }
     .error { border-color:color-mix(in srgb,var(--bad) 65%,var(--line)) }
@@ -43,8 +43,8 @@
     dl { display:grid; grid-template-columns:1fr auto; gap:8px 12px; margin:12px 0 0 }
     dt { color:var(--muted) } dd { margin:0; text-align:right; font-variant-numeric:tabular-nums }
     #message { margin-bottom:14px }
-    .trend-wrap { overflow-x:auto }
-    .trend-chart { width:100%; min-width:620px; height:auto; display:block }
+    .trend-wrap { width:100%; min-width:0; overflow:hidden }
+    .trend-chart { width:100%; max-width:100%; height:auto; display:block }
     .trend-grid { stroke:#343440; stroke-width:1 }
     .trend-label { fill:var(--muted); font-size:12px }
     .trend-codex { stroke:var(--blue); fill:none; stroke-width:3 }
@@ -139,6 +139,7 @@ let refreshTimer = null;
 let dashboardRefreshMs = 300000;
 let trendRangeDays = 7;
 let latestHistory = null;
+let trendRenderWidth = 0;
 
 function message(text, kind='muted') { $('message').className=`card ${kind}`; $('message').textContent=text; }
 function diagnostic(label, value) { $('diagnostics').textContent=`${label}\n${typeof value==='string'?value:JSON.stringify(value,null,2)}`; }
@@ -267,14 +268,18 @@ function setTrendRange(days){
 function renderHistory(data){
   latestHistory=data;
   const svg=$('trendChart'), note=$('trendNote'), samples=Array.isArray(data.samples)?data.samples:[];
-  const rangeDays=trendRangeDays, now=Date.now()/1000, start=now-rangeDays*86400, W=900,H=280,L=52,R=18,T=16,B=36;
+  const measuredWidth=Math.floor(Number(svg.parentElement?.clientWidth||svg.clientWidth||900));
+  const W=Math.max(240,measuredWidth),H=W<520?240:280,L=W<520?44:52,R=W<520?8:18,T=16,B=36;
+  const rangeDays=trendRangeDays, now=Date.now()/1000, start=now-rangeDays*86400;
+  trendRenderWidth=W;
+  svg.setAttribute('viewBox',`0 0 ${W} ${H}`);
   const x=t=>L+(Math.max(start,Math.min(now,t))-start)/(now-start)*(W-L-R);
   const y=v=>T+(100-Math.max(0,Math.min(100,v)))/100*(H-T-B);
   let markup='';
   for(const pct of [0,25,50,75,100]){
     const yy=y(pct); markup+=`<line class="trend-grid" x1="${L}" y1="${yy}" x2="${W-R}" y2="${yy}"/><text class="trend-label" x="${L-8}" y="${yy+4}" text-anchor="end">${pct}%</text>`;
   }
-  const divisions=rangeDays===1?6:7;
+  const divisions=W<520?4:(rangeDays===1?6:7);
   for(let step=0;step<=divisions;step++){
     const ts=start+step*(now-start)/divisions,xx=x(ts); markup+=`<line class="trend-grid" x1="${xx}" y1="${T}" x2="${xx}" y2="${H-B}"/><text class="trend-label" x="${xx}" y="${H-12}" text-anchor="middle">${trendTickLabel(ts,rangeDays)}</text>`;
   }
@@ -358,6 +363,13 @@ $('sendLoginInput').addEventListener('click',sendLoginInput);
 $('loginInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendLoginInput()}});
 $('cancelLogin').addEventListener('click',cancelLogin);
 $('refresh').addEventListener('click',refreshUsage);
+if(typeof ResizeObserver!=='undefined'){
+  const trendResizeObserver=new ResizeObserver(entries=>{
+    const width=Math.floor(Number(entries[0]?.contentRect?.width||0));
+    if(latestHistory&&width>0&&Math.abs(width-trendRenderWidth)>1)renderHistory(latestHistory);
+  });
+  trendResizeObserver.observe($('trendChart').parentElement);
+}
 (async()=>{
   await Promise.all([loadAuth(),loadBackground()]);
   await refreshUsage();

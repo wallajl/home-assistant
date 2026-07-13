@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3
+
+- Redact quoted or escaped-serialized OAuth credentials, complete Authorization values across authentication schemes, and whitespace-delimited device/OAuth codes—including `is:` / `was:` forms—before diagnostics are persisted or returned by the status API.
+- Make login cancellation and provider-process publication atomic so a cancelled login cannot launch afterward.
+- Enforce the proxy's wall-clock deadline across connection, response headers, and normal or HTTP-error response bodies.
+- Preserve valid user provider settings across startup and back up malformed, non-UTF-8, or empty configuration before recovering to defaults.
+- Make the quota trend graph redraw to the available phone, tablet, or desktop width without horizontal scrolling.
+- Add focused regression coverage for each security, persistence, deadline, and responsive-layout fix.
+
 ## 0.5.2
 
 - Add an accessible 1-day / 7-day selector to the combined Codex and Claude subscription-usage trend while retaining the full seven-day local history.

@@ -31,6 +31,12 @@ class ServerTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory(prefix="codexbar-tests-")
         root = pathlib.Path(self.temp.name)
+        setattr(server, "CONFIG_HOME", root)
+        setattr(server, "CONFIG_PATH", root / "config.json")
+        setattr(server, "AUTH_FILES", {
+            "codex": root / ".codex/auth.json",
+            "claude": root / ".claude/.credentials.json",
+        })
         setattr(server, "HISTORY_PATH", root / "history.json")
         setattr(server, "ACTIVITY_LOG_PATH", root / "activity.log")
         with server.BACKGROUND_LOCK:
@@ -99,7 +105,9 @@ class ServerTests(unittest.TestCase):
     def test_activity_messages_redact_urls_and_token_values(self) -> None:
         cases = [
             ("authorization=secret https://example.test/callback?code=secret", ("authorization=secret", "code=secret")),
-            ("Authorization: Bearer TOKEN_VALUE_ALPHA_123", ("TOKEN_VALUE_ALPHA_123",)),
+            ("Authorization: Bearer BEARER_SENTINEL_ALPHA_123", ("BEARER_SENTINEL_ALPHA_123",)),
+            ("Authorization: Basic BASIC_SENTINEL_BETA_456", ("BASIC_SENTINEL_BETA_456",)),
+            ("Authorization: Token TOKEN_SENTINEL_GAMMA_789", ("TOKEN_SENTINEL_GAMMA_789",)),
             ("authorization='Bearer quotedsecret'", ("quotedsecret",)),
             ("request failed with Bearer standalone-secret", ("standalone-secret",)),
             ("id_token=eyJheader.payload.signature; retrying", ("eyJheader",)),
@@ -108,9 +116,31 @@ class ServerTests(unittest.TestCase):
         for message, secrets in cases:
             with self.subTest(message=message):
                 safe = server.sanitize_activity_message(message)
+                server.activity_log("error", message)
+                raw = server.ACTIVITY_LOG_PATH.read_text()
+                exposed = json.dumps(server.read_activity_log())
                 for secret in secrets:
                     self.assertNotIn(secret, safe)
+                    self.assertNotIn(secret, raw)
+                    self.assertNotIn(secret, exposed)
                 self.assertNotIn("http", safe)
+
+    def test_activity_messages_redact_quoted_json_and_whitespace_codes(self) -> None:
+        cases = [
+            ('provider error {"access_token":"LEAK_SENTINEL_ALPHA_77"}', "LEAK_SENTINEL_ALPHA_77"),
+            (r'provider error {\"access_token\":\"ESCAPED_SENTINEL_ALPHA_19\"}', "ESCAPED_SENTINEL_ALPHA_19"),
+            ("device code DEVICE-SENTINEL-42 was rejected", "DEVICE-SENTINEL-42"),
+            ("oauth code OAUTH-SENTINEL-84 expired", "OAUTH-SENTINEL-84"),
+            ("device code is: DEVICE-COLON-SENTINEL-21", "DEVICE-COLON-SENTINEL-21"),
+            ("oauth code was: OAUTH-COLON-SENTINEL-43", "OAUTH-COLON-SENTINEL-43"),
+            ("callback code is: CALLBACK-COLON-SENTINEL-65", "CALLBACK-COLON-SENTINEL-65"),
+        ]
+        for message, secret in cases:
+            with self.subTest(message=message):
+                self.assertNotIn(secret, server.sanitize_activity_message(message))
+                server.activity_log("error", message)
+                self.assertNotIn(secret, server.ACTIVITY_LOG_PATH.read_text())
+                self.assertNotIn(secret, json.dumps(server.read_activity_log()))
 
     def test_activity_log_sanitizes_structured_fields_and_legacy_reads(self) -> None:
         server.activity_log(
@@ -130,7 +160,7 @@ class ServerTests(unittest.TestCase):
             "access_token": "TOKEN_VALUE_ZETA_678",
         }) + "\n")
         exposed = json.dumps(server.read_activity_log())
-        self.assertNotIn("TOKEN_VALUE_EPSILON_345", exposed)
+        self.assertNotIn("TOKEN_..._345", exposed)
         self.assertNotIn("TOKEN_VALUE_ZETA_678", exposed)
 
     def test_malformed_history_is_quarantined_before_replacement(self) -> None:
@@ -227,45 +257,57 @@ class ServerTests(unittest.TestCase):
         self.assertNotIn("http", diagnostics)
 
     def test_usage_proxy_calls_are_serialized(self) -> None:
-        original_urlopen = server.urllib.request.urlopen
         active = 0
         peak = 0
         guard = threading.Lock()
 
-        class Response:
-            status = 200
-            headers = {"Content-Type": "application/json"}
+        class UsageHandler(server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
 
-            def __enter__(self):
+            def do_GET(self):
                 nonlocal active, peak
                 with guard:
                     active += 1
                     peak = max(peak, active)
-                time.sleep(0.05)
-                return self
+                try:
+                    time.sleep(0.1)
+                    body = b"[]"
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                finally:
+                    with guard:
+                        active -= 1
 
-            def __exit__(self, *_args):
-                nonlocal active
-                with guard:
-                    active -= 1
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), UsageHandler)
+        server_thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        original_url = server.CODEXBAR_URL
+        statuses: list[int] = []
+        start = threading.Barrier(3)
 
-            @staticmethod
-            def read() -> bytes:
-                return b"[]"
+        def request_usage() -> None:
+            start.wait()
+            statuses.append(server.proxy_get("/usage?provider=both")[0])
 
         try:
-            server.urllib.request.urlopen = lambda *_args, **_kwargs: Response()
-            threads = [
-                threading.Thread(target=lambda: server.proxy_get("/usage?provider=both"))
-                for _ in range(2)
-            ]
+            server_thread.start()
+            setattr(server, "CODEXBAR_URL", f"http://127.0.0.1:{httpd.server_port}")
+            threads = [threading.Thread(target=request_usage) for _ in range(2)]
             for thread in threads:
                 thread.start()
+            start.wait()
             for thread in threads:
                 thread.join()
         finally:
-            server.urllib.request.urlopen = original_urlopen
+            setattr(server, "CODEXBAR_URL", original_url)
+            httpd.shutdown()
+            httpd.server_close()
+            server_thread.join(timeout=1)
 
+        self.assertEqual(statuses, [200, 200])
         self.assertEqual(peak, 1)
 
     def test_usage_lock_wait_consumes_request_timeout(self) -> None:
@@ -280,6 +322,153 @@ class ServerTests(unittest.TestCase):
         self.assertIn(b"busy", body)
         self.assertLess(elapsed, 0.15)
 
+    def test_proxy_deadline_stops_drip_response(self) -> None:
+        class DripHandler(server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                body = b"0123456789"
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    for byte in body:
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        time.sleep(0.03)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), DripHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        original_url = server.CODEXBAR_URL
+        try:
+            thread.start()
+            setattr(server, "CODEXBAR_URL", f"http://127.0.0.1:{httpd.server_port}")
+            started = time.monotonic()
+            status, body, _ = server.proxy_get("/drip", timeout=0.1)
+            elapsed = time.monotonic() - started
+        finally:
+            setattr(server, "CODEXBAR_URL", original_url)
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=1)
+
+        self.assertEqual(status, 504)
+        self.assertIn(b"deadline", body)
+        self.assertLess(elapsed, 0.2)
+
+    def test_proxy_deadline_stops_drip_error_response(self) -> None:
+        class DripErrorHandler(server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                body = b"rate-limited"
+                self.send_response(429)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                try:
+                    for byte in body:
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        time.sleep(0.15)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), DripErrorHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        original_url = server.CODEXBAR_URL
+        try:
+            thread.start()
+            setattr(server, "CODEXBAR_URL", f"http://127.0.0.1:{httpd.server_port}")
+            started = time.monotonic()
+            status, body, _ = server.proxy_get("/drip-error", timeout=0.2)
+            elapsed = time.monotonic() - started
+        finally:
+            setattr(server, "CODEXBAR_URL", original_url)
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=1)
+
+        self.assertEqual(status, 504)
+        self.assertIn(b"deadline", body)
+        self.assertLess(elapsed, 0.28)
+
+    def test_proxy_deadline_stops_drip_response_headers(self) -> None:
+        class DripHeaderHandler(server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                pass
+
+            def do_GET(self):
+                response = b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{}"
+                try:
+                    for byte in response:
+                        self.connection.sendall(bytes([byte]))
+                        time.sleep(0.02)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
+
+        httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), DripHeaderHandler)
+        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+        original_url = server.CODEXBAR_URL
+        try:
+            thread.start()
+            setattr(server, "CODEXBAR_URL", f"http://127.0.0.1:{httpd.server_port}")
+            started = time.monotonic()
+            status, body, _ = server.proxy_get("/drip-headers", timeout=0.1)
+            elapsed = time.monotonic() - started
+        finally:
+            setattr(server, "CODEXBAR_URL", original_url)
+            httpd.shutdown()
+            httpd.server_close()
+            thread.join(timeout=1)
+
+        self.assertEqual(status, 504)
+        self.assertIn(b"deadline", body)
+        self.assertLess(elapsed, 0.25)
+
+    def test_cancel_during_login_setup_prevents_process_start(self) -> None:
+        original_ensure_auth_dirs = server.ensure_auth_dirs
+        original_popen = server.subprocess.Popen
+        entered_setup = threading.Event()
+        release_setup = threading.Event()
+        process_started = threading.Event()
+
+        class FakeProcess:
+            returncode = 0
+
+            @staticmethod
+            def poll():
+                return 0
+
+        def blocked_setup() -> None:
+            entered_setup.set()
+            self.assertTrue(release_setup.wait(timeout=2))
+
+        def fake_popen(*_args, **_kwargs):
+            process_started.set()
+            return FakeProcess()
+
+        try:
+            setattr(server, "ensure_auth_dirs", blocked_setup)
+            server.subprocess.Popen = fake_popen
+            session = server.LoginSession("codex", "127.0.0.1")
+            self.assertTrue(entered_setup.wait(timeout=1))
+            session.cancel()
+            release_setup.set()
+            session.thread.join(timeout=2)
+        finally:
+            release_setup.set()
+            setattr(server, "ensure_auth_dirs", original_ensure_auth_dirs)
+            server.subprocess.Popen = original_popen
+
+        self.assertTrue(session.done)
+        self.assertTrue(session.cancelled)
+        self.assertFalse(process_started.is_set())
+        self.assertIsNone(session.process)
+
     def test_cancelled_claude_login_does_not_start_after_lock_wait(self) -> None:
         server.CLAUDE_CLI_LOCK.acquire()
         try:
@@ -292,6 +481,52 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(session.done)
         self.assertTrue(session.cancelled)
         self.assertIsNone(session.process)
+
+    def test_startup_preserves_valid_user_provider_settings(self) -> None:
+        configured = server.default_config()
+        configured["providers"][0]["enabled"] = False
+        server.write_config(configured)
+        before = server.CONFIG_PATH.read_bytes()
+
+        server.ensure_basic_config()
+
+        self.assertEqual(server.CONFIG_PATH.read_bytes(), before)
+        self.assertEqual(server.read_config(), configured)
+
+    def test_startup_backs_up_empty_config_before_recovery(self) -> None:
+        server.CONFIG_PATH.write_bytes(b"")
+
+        server.ensure_basic_config()
+
+        backups = list(server.CONFIG_PATH.parent.glob("config.invalid-*.json"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), b"")
+        self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
+        self.assertEqual(server.read_config(), server.default_config())
+
+    def test_startup_backs_up_invalid_config_before_recovery(self) -> None:
+        malformed = b'{"providers": [broken'
+        server.CONFIG_PATH.write_bytes(malformed)
+
+        server.ensure_basic_config()
+
+        backups = list(server.CONFIG_PATH.parent.glob("config.invalid-*.json"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), malformed)
+        self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
+        self.assertEqual(server.read_config(), server.default_config())
+
+    def test_startup_backs_up_non_utf8_config_before_recovery(self) -> None:
+        malformed = b'{"providers": ["\xff"]}'
+        server.CONFIG_PATH.write_bytes(malformed)
+
+        server.ensure_basic_config()
+
+        backups = list(server.CONFIG_PATH.parent.glob("config.invalid-*.json"))
+        self.assertEqual(len(backups), 1)
+        self.assertEqual(backups[0].read_bytes(), malformed)
+        self.assertEqual(backups[0].stat().st_mode & 0o777, 0o600)
+        self.assertEqual(server.read_config(), server.default_config())
 
     def test_credential_home_migration_preserves_unexpected_symlinks(self) -> None:
         root = pathlib.Path(self.temp.name) / "root"
@@ -343,7 +578,9 @@ const vm=require('vm');
 const realSetTimeout=setTimeout;
 const source={json.dumps(script)};
 class ClassList{{constructor(){{this.values=new Set()}} add(v){{this.values.add(v)}} remove(v){{this.values.delete(v)}} toggle(v,force){{if(force===undefined)force=!this.values.has(v);force?this.values.add(v):this.values.delete(v);return force}} contains(v){{return this.values.has(v)}}}}
-class Element{{constructor(id){{this.id=id;this.classList=new ClassList();this.attributes={{}};this.textContent='';this.innerHTML='';this.className='';this.disabled=false;this.value=''}}addEventListener(){{}}setAttribute(k,v){{this.attributes[k]=String(v)}}getAttribute(k){{return this.attributes[k]}}}}
+class Element{{constructor(id){{this.id=id;this.classList=new ClassList();this.attributes={{}};this.textContent='';this.innerHTML='';this.className='';this.disabled=false;this.value='';this.clientWidth=900;this.parentElement={{clientWidth:900}}}}addEventListener(){{}}setAttribute(k,v){{this.attributes[k]=String(v)}}getAttribute(k){{return this.attributes[k]}}}}
+let resizeCallback=null;
+class ResizeObserver{{constructor(callback){{resizeCallback=callback}}observe(){{}}}}
 const elements={{}};
 const calls=[];
 const timerDelays=[];
@@ -361,7 +598,7 @@ const responses={{
   ]}}
 }};
 const context={{
-  console,URL,Date,Promise,JSON,Math,Object,Array,Number,String,Error,
+  console,URL,Date,Promise,JSON,Math,Object,Array,Number,String,Error,ResizeObserver,
   document:{{baseURI:'http://example.test/ingress/',getElementById:id=>elements[id]||(elements[id]=new Element(id))}},
   setTimeout:(fn,delay)=>{{timerDelays.push(delay);return timerDelays.length}},clearTimeout:()=>{{}},
   setInterval:()=>1,clearInterval:()=>{{}},
@@ -381,6 +618,10 @@ realSetTimeout(()=>{{
     if(historyCalls!==1)throw new Error('expected one initial history request, got '+historyCalls);
     if(calls.some(item=>item==='cost?provider=both'))throw new Error('cost endpoint should not be requested');
     if(!timerDelays.includes(90000)||timerDelays.includes(300000))throw new Error('wrong initial timer '+JSON.stringify(timerDelays));
+    elements.trendChart.parentElement.clientWidth=320;
+    if(!resizeCallback)throw new Error('ResizeObserver callback was not registered');
+    resizeCallback([{{contentRect:{{width:320}}}}]);
+    if(elements.trendChart.getAttribute('viewBox')!=='0 0 320 240')throw new Error('mobile chart did not resize: '+elements.trendChart.getAttribute('viewBox'));
     vm.runInContext('setTrendRange(1)',context);
     if(elements.trendHeading.textContent!=='1-day usage trend')throw new Error('1-day heading not updated');
     if(elements.showTrend1d.getAttribute('aria-pressed')!=='true')throw new Error('1-day aria state not selected');
@@ -410,6 +651,9 @@ realSetTimeout(()=>{{
         self.assertNotIn("refreshUsage(),loadHistory()", frontend)
         self.assertNotIn('id="cost"', frontend)
         self.assertNotIn("api('cost?provider=both')", frontend)
+        self.assertNotIn("min-width:620px", frontend)
+        self.assertNotIn("overflow-x:auto", frontend)
+        self.assertIn("ResizeObserver", frontend)
 
 
 if __name__ == "__main__":
