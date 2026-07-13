@@ -4,6 +4,14 @@
 The CodexBar CLI already serves read-only usage/cost JSON on 127.0.0.1:8080.
 This wrapper adds an admin GUI and a tiny config API so users do not need to hand-edit
 provider_config_json or files in /addon_configs.
+
+Ingress notes (things that break silently if changed):
+- HA core proxies request bodies with Transfer-Encoding: chunked, so POST
+  handling must decode chunked bodies, not just trust Content-Length.
+- The browser URL under Ingress is /api/hassio_ingress/<token>[/...] and may
+  lack a trailing slash; index.html gets a <base> tag injected from the
+  X-Ingress-Path request header so relative API URLs always resolve.
+- Ingress requests originate from 172.30.32.2 only.
 """
 from __future__ import annotations
 
@@ -26,15 +34,24 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = pathlib.Path("/usr/share/codexbar-addon")
 CONFIG_PATH = pathlib.Path(os.environ.get("CODEXBAR_CONFIG", "/config/codexbar/config.json"))
+CONFIG_HOME = pathlib.Path(os.environ.get("CODEXBAR_HOME", "/config"))
 CODEXBAR_URL = "http://127.0.0.1:8080"
 MAX_BODY = 512 * 1024
 LOGIN_TIMEOUT = 10 * 60
 LOGIN_SESSIONS: dict[str, "LoginSession"] = {}
 LOGIN_LOCK = threading.Lock()
-ANSI_ESCAPE_RE = re.compile(r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
+# OSC sequences (terminal hyperlinks/titles): ESC ] ... BEL or ESC ] ... ESC \
+OSC_RE = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+# CSI and two-byte escape sequences (colors, cursor movement, ...)
+CSI_RE = re.compile(r"\x1b(?:[@-Z\\^_]|\[[0-?]*[ -/]*[@-~])")
+# Any remaining C0 control characters except newline and tab
+CTRL_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+URL_RE = re.compile(r"https?://[^\s<>\"'()\[\]{}\x00-\x20]+")
+CODE_RE = re.compile(r"(?:one-time code|device code)[^\n]*\n+\s*([A-Z0-9]{3,12}-[A-Z0-9]{3,12})", re.IGNORECASE)
+PROMPT_RE = re.compile(r"(?:paste|enter)[^\n]*(?:code|token)[^\n]*[>:]\s*$", re.IGNORECASE)
 AUTH_FILES = {
-    "codex": pathlib.Path("/config/.codex/auth.json"),
-    "claude": pathlib.Path("/config/.claude/.credentials.json"),
+    "codex": CONFIG_HOME / ".codex/auth.json",
+    "claude": CONFIG_HOME / ".claude/.credentials.json",
 }
 ALLOWED_CLIENTS = {
     item.strip()
@@ -45,75 +62,53 @@ ALLOWED_CLIENTS = {
 PROVIDER_PRESETS = [
     {
         "id": "codex",
-        "name": "Codex",
+        "name": "OpenAI Codex",
         "defaultSource": "auto",
-        "auth": "OAuth file from Codex CLI",
-        "help": "Codex subscription quota uses OAuth from /config/.codex/auth.json. There is no normal API-key box for Codex quota.",
+        "auth": "ChatGPT subscription login",
+        "help": "Uses the official Codex device-code flow and stores OAuth under /config/.codex.",
         "fields": [],
     },
     {
         "id": "claude",
         "name": "Claude",
         "defaultSource": "auto",
-        "auth": "Claude CLI files, Admin API key, OAuth token, or cookie",
-        "help": "For simple usage, copy Claude CLI auth into /config/.claude. For org spend, paste an Anthropic Admin API key and choose API.",
-        "fields": ["apiKey", "cookieHeader"],
-    },
-    {
-        "id": "openai",
-        "name": "OpenAI API",
-        "defaultSource": "api",
-        "auth": "OpenAI Admin API key",
-        "help": "Paste an OpenAI Admin key for organization/project spend and usage. Optional project ID goes in Workspace / Project ID.",
-        "fields": ["apiKey", "workspaceID"],
-    },
-    {
-        "id": "openrouter",
-        "name": "OpenRouter",
-        "defaultSource": "api",
-        "auth": "OpenRouter API key",
-        "help": "Paste a sk-or-v1... key from https://openrouter.ai/settings/keys. OpenRouter does not use OAuth here.",
-        "fields": ["apiKey"],
-    },
-    {
-        "id": "litellm",
-        "name": "LiteLLM",
-        "defaultSource": "api",
-        "auth": "Virtual key + proxy URL",
-        "help": "Requires a LiteLLM virtual key and base URL in Server / Base URL.",
-        "fields": ["apiKey", "enterpriseHost"],
-    },
-    {
-        "id": "llmproxy",
-        "name": "LLM Proxy",
-        "defaultSource": "api",
-        "auth": "API key + proxy URL",
-        "help": "Requires an API key and base URL in Server / Base URL.",
-        "fields": ["apiKey", "enterpriseHost"],
-    },
-    {
-        "id": "gemini",
-        "name": "Gemini",
-        "defaultSource": "api",
-        "auth": "Google/Gemini credentials",
-        "help": "Usually uses local Google/Gemini CLI credentials copied into the add-on config home.",
-        "fields": ["apiKey"],
-    },
-    {
-        "id": "copilot",
-        "name": "Copilot",
-        "defaultSource": "api",
-        "auth": "GitHub/Copilot token",
-        "help": "Use a Copilot-capable token if you have one, or leave blank for local auth methods.",
-        "fields": ["apiKey"],
+        "auth": "Claude subscription login",
+        "help": "Uses the official Claude login URL and stores OAuth under /config/.claude.",
+        "fields": [],
     },
 ]
 PROVIDER_IDS = {provider["id"] for provider in PROVIDER_PRESETS}
 
 
+def default_config() -> dict:
+    return {
+        "version": 1,
+        "providers": [
+            {"id": "codex", "enabled": True, "source": "auto"},
+            {"id": "claude", "enabled": True, "source": "auto"},
+        ],
+    }
+
+
+def clean_terminal_text(text: str) -> str:
+    text = OSC_RE.sub("", text)
+    text = CSI_RE.sub("", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return CTRL_RE.sub("", text)
+
+
+def ensure_auth_dirs() -> None:
+    for path in [CONFIG_PATH.parent, *(auth.parent for auth in AUTH_FILES.values())]:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            os.chmod(path, 0o700)
+        except OSError as exc:
+            print(f"WARNING: could not prepare {path}: {exc}", flush=True)
+
+
 def read_config() -> dict:
     if not CONFIG_PATH.exists() or CONFIG_PATH.stat().st_size == 0:
-        return {"version": 1, "providers": []}
+        return default_config()
     try:
         with CONFIG_PATH.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
@@ -123,7 +118,7 @@ def read_config() -> dict:
             return data
     except json.JSONDecodeError:
         pass
-    return {"version": 1, "providers": [], "_error": "Existing config is not valid JSON"}
+    return {**default_config(), "_error": "Existing config is not valid JSON"}
 
 
 def validate_config(data: object) -> tuple[bool, str]:
@@ -141,6 +136,8 @@ def validate_config(data: object) -> tuple[bool, str]:
             return False, f"providers[{idx}].id is required."
         if pid in seen:
             return False, f"Duplicate provider id: {pid}."
+        if pid not in PROVIDER_IDS:
+            return False, f"Unsupported provider in this add-on version: {pid}."
         seen.add(pid)
         if "enabled" in provider and not isinstance(provider["enabled"], bool):
             return False, f"{pid}.enabled must be true or false."
@@ -164,6 +161,14 @@ def write_config(data: dict) -> None:
             os.unlink(temp_name)
         except FileNotFoundError:
             pass
+
+
+def ensure_basic_config() -> None:
+    """Keep this add-on intentionally limited to Codex and Claude."""
+    wanted = default_config()
+    current = read_config()
+    if not CONFIG_PATH.exists() or current != wanted:
+        write_config(wanted)
 
 
 def run_codexbar_validate() -> dict:
@@ -210,41 +215,21 @@ def auth_status() -> dict:
                 item["message"] = f"Could not read JSON: {exc}"
         else:
             item["ok"] = False
-            item["message"] = "Not uploaded yet"
+            item["message"] = "Not logged in yet"
         status[provider] = item
     return status
 
 
-def write_auth_file(provider: str, content: str) -> dict:
-    if provider not in AUTH_FILES:
-        raise ValueError("provider must be codex or claude")
-    data = json.loads(content)
-    if provider == "codex":
-        tokens = data.get("tokens") if isinstance(data, dict) else None
-        if not isinstance(tokens, dict) or not (tokens.get("access_token") or tokens.get("refresh_token")):
-            raise ValueError("Codex auth.json must contain tokens.access_token or tokens.refresh_token")
-    if provider == "claude":
-        oauth = data.get("claudeAiOauth") if isinstance(data, dict) else None
-        if not isinstance(oauth, dict) or not (oauth.get("accessToken") or oauth.get("refreshToken")):
-            raise ValueError("Claude .credentials.json must contain claudeAiOauth accessToken or refreshToken")
-    path = AUTH_FILES[provider]
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-            fh.write("\n")
-        os.chmod(temp_name, 0o600)
-        os.replace(temp_name, path)
-    finally:
-        try:
-            os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
-    return auth_status()[provider]
-
 
 class LoginSession:
+    """Runs a provider login CLI on a PTY and exposes its state to the UI.
+
+    codex login --device-auth prints a URL + one-time code and polls; no input
+    is needed. claude auth login prints an OAuth URL and then blocks on
+    "Paste code here if prompted >", so the UI must be able to send text back
+    into the PTY via send_input().
+    """
+
     def __init__(self, provider: str, owner: str):
         self.owner = owner
         if provider == "codex":
@@ -258,34 +243,46 @@ class LoginSession:
         self.command = command
         self.output = ""
         self.url: str | None = None
+        self.code: str | None = None
+        self.awaiting_input = False
         self.done = False
         self.ok = False
+        self.cancelled = False
         self.error: str | None = None
         self.started = time.time()
         self.process: subprocess.Popen[bytes] | None = None
+        self.master_fd: int | None = None
+        self.io_lock = threading.Lock()
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def _env(self) -> dict[str, str]:
         env = os.environ.copy()
-        env["HOME"] = "/config"
-        env["XDG_CONFIG_HOME"] = "/config/xdg"
+        env["HOME"] = str(CONFIG_HOME)
+        env["XDG_CONFIG_HOME"] = str(CONFIG_HOME / "xdg")
         env["CODEXBAR_CONFIG"] = str(CONFIG_PATH)
-        env["CODEXBAR_HOME"] = "/config"
+        env["CODEXBAR_HOME"] = str(CONFIG_HOME)
         env["PATH"] = "/usr/local/bin:/usr/bin:/bin:" + env.get("PATH", "")
+        env["TERM"] = "xterm-256color"
         return env
 
     def _append(self, text: str) -> None:
-        text = ANSI_ESCAPE_RE.sub("", text).replace("\r", "")
-        self.output = (self.output + text)[-12000:]
-        match = re.search(r"https?://[^\s)>'\"]+", self.output)
+        self.output = clean_terminal_text(self.output + text)[-12000:]
+        match = URL_RE.search(self.output)
         if match:
-            self.url = match.group(0).rstrip(".,;:)]}>")
+            self.url = match.group(0).rstrip(".,;:!?'\"")
+        code_match = CODE_RE.search(self.output)
+        if code_match:
+            self.code = code_match.group(1)
+        tail = self.output.rstrip("\n").rsplit("\n", 1)[-1]
+        self.awaiting_input = bool(PROMPT_RE.search(tail))
 
     def _run(self) -> None:
-        master_fd = None
         try:
+            ensure_auth_dirs()
             master_fd, slave_fd = os.openpty()
+            with self.io_lock:
+                self.master_fd = master_fd
             self.process = subprocess.Popen(
                 self.command,
                 stdin=slave_fd,
@@ -308,8 +305,7 @@ class LoginSession:
                         break
                     if not chunk:
                         break
-                    text = chunk.decode("utf-8", errors="replace")
-                    self._append(text)
+                    self._append(chunk.decode("utf-8", errors="replace"))
             # drain after exit/timeout
             end_drain = time.time() + 1.5
             while time.time() < end_drain:
@@ -326,8 +322,17 @@ class LoginSession:
             if self.process.poll() is None:
                 self.error = "Login timed out waiting for the provider CLI to finish. You can retry."
                 self.cancel()
+            elif self.cancelled:
+                self.error = "Login cancelled."
             else:
-                self.ok = self.process.returncode == 0 or "successfully logged in" in self.output.lower() or "login successful" in self.output.lower()
+                auth = auth_status().get(self.provider, {})
+                auth_fresh = bool(auth.get("ok")) and AUTH_FILES[self.provider].stat().st_mtime >= self.started
+                self.ok = (
+                    self.process.returncode == 0
+                    or auth_fresh
+                    or "successfully logged in" in self.output.lower()
+                    or "login successful" in self.output.lower()
+                )
                 if not self.ok:
                     self.error = f"Login command exited with status {self.process.returncode}."
         except FileNotFoundError as exc:
@@ -335,14 +340,32 @@ class LoginSession:
         except Exception as exc:  # noqa: BLE001
             self.error = str(exc)
         finally:
-            if master_fd is not None:
-                try:
-                    os.close(master_fd)
-                except OSError:
-                    pass
+            with self.io_lock:
+                if self.master_fd is not None:
+                    try:
+                        os.close(self.master_fd)
+                    except OSError:
+                        pass
+                    self.master_fd = None
+            self.awaiting_input = False
             self.done = True
 
+    def send_input(self, text: str) -> None:
+        if self.done:
+            raise RuntimeError("Login session already finished.")
+        text = text.strip()
+        if not text:
+            raise ValueError("Nothing to send.")
+        if len(text) > 4096:
+            raise ValueError("Input is too long.")
+        with self.io_lock:
+            if self.master_fd is None:
+                raise RuntimeError("Login session is not accepting input.")
+            os.write(self.master_fd, (text + "\r").encode("utf-8"))
+        self.awaiting_input = False
+
     def cancel(self) -> None:
+        self.cancelled = True
         proc = self.process
         if proc and proc.poll() is None:
             try:
@@ -364,8 +387,11 @@ class LoginSession:
             "command": " ".join(self.command),
             "done": self.done,
             "ok": self.ok,
+            "cancelled": self.cancelled,
             "error": self.error,
             "url": self.url,
+            "code": self.code,
+            "awaitingInput": self.awaiting_input,
             "output": self.output,
             "auth": auth_status().get(self.provider),
         }
@@ -379,9 +405,10 @@ def start_login(provider: str, owner: str) -> LoginSession:
                 LOGIN_SESSIONS.pop(sid, None)
                 continue
             if not existing.done:
-                active_count += 1
                 if existing.provider == provider and existing.owner == owner:
                     existing.cancel()
+                else:
+                    active_count += 1
         if active_count >= 2:
             raise RuntimeError("Too many login sessions are already running. Cancel one and retry.")
         session = LoginSession(provider, owner)
@@ -412,7 +439,9 @@ def proxy_get(path: str, timeout: int = 45) -> tuple[int, bytes, str]:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "CodexBarSetup/0.2"
+    server_version = "CodexBarSetup/0.3"
+    # HTTP/1.1 keeps ingress connections alive; responses always carry Content-Length.
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: object) -> None:
         message = fmt % args
@@ -421,26 +450,54 @@ class Handler(BaseHTTPRequestHandler):
 
     def send_json(self, payload: object, status: int = 200) -> None:
         body = json.dumps(payload, indent=2).encode()
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        self.send_bytes(body, status, "application/json; charset=utf-8")
 
     def send_bytes(self, body: bytes, status: int, content_type: str) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
-    def read_json_body(self) -> object:
-        length = int(self.headers.get("Content-Length", "0"))
+    def read_body(self) -> bytes:
+        # HA core's ingress proxy streams POST bodies as Transfer-Encoding:
+        # chunked with no Content-Length; BaseHTTPRequestHandler does not
+        # decode that, so handle it here or every POST arrives empty.
+        encoding = (self.headers.get("Transfer-Encoding") or "").lower()
+        if "chunked" in encoding:
+            chunks: list[bytes] = []
+            total = 0
+            while True:
+                size_line = self.rfile.readline(128).split(b";", 1)[0].strip()
+                try:
+                    size = int(size_line or b"0", 16)
+                except ValueError as exc:
+                    raise ValueError(f"Bad chunked encoding: {size_line!r}") from exc
+                if size == 0:
+                    while True:
+                        trailer = self.rfile.readline(1024)
+                        if trailer in (b"\r\n", b"\n", b""):
+                            break
+                    break
+                total += size
+                if total > MAX_BODY:
+                    raise ValueError("Request body is too large")
+                chunks.append(self.rfile.read(size))
+                self.rfile.read(2)  # trailing CRLF after each chunk
+            return b"".join(chunks)
+        length = int(self.headers.get("Content-Length") or 0)
         if length > MAX_BODY:
             raise ValueError("Request body is too large")
-        raw = self.rfile.read(length)
+        return self.rfile.read(length)
+
+    def read_json_body(self) -> object:
+        raw = self.read_body()
+        if not raw:
+            raise ValueError("Empty request body")
         return json.loads(raw.decode("utf-8"))
 
     def client_allowed(self) -> bool:
@@ -449,8 +506,20 @@ class Handler(BaseHTTPRequestHandler):
     def reject_forbidden_client(self) -> bool:
         if self.client_allowed():
             return False
-        self.send_json({"error": "forbidden"}, 403)
+        print(f"Rejected request from {self.client_address[0]} (allowed: {sorted(ALLOWED_CLIENTS)})", flush=True)
+        self.send_json(
+            {"error": f"forbidden: client {self.client_address[0]} is not the Home Assistant ingress proxy"},
+            403,
+        )
         return True
+
+    def serve_index(self) -> None:
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        ingress_path = (self.headers.get("X-Ingress-Path") or "").strip()
+        if ingress_path.startswith("/"):
+            base = urllib.parse.quote(ingress_path.rstrip("/"), safe="/%") + "/"
+            html = html.replace('<base href="./">', f'<base href="{base}">', 1)
+        self.send_bytes(html.encode("utf-8"), 200, "text/html; charset=utf-8")
 
     def do_GET(self) -> None:  # noqa: N802
         if self.reject_forbidden_client():
@@ -458,8 +527,8 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         query = f"?{parsed.query}" if parsed.query else ""
-        if path in ("/", "/index.html"):
-            self.send_bytes((ROOT / "index.html").read_bytes(), 200, "text/html; charset=utf-8")
+        if path in ("", "/", "/index.html"):
+            self.serve_index()
             return
         if path == "/api/config":
             cfg = read_config()
@@ -481,7 +550,22 @@ class Handler(BaseHTTPRequestHandler):
             payload = {"ok": ok, "message": msg, "codexbar": run_codexbar_validate()}
             self.send_json(payload, 200 if ok else 400)
             return
-        if path in ("/health", "/usage", "/cost"):
+        if path == "/health":
+            # Watchdog endpoint: the setup UI (which serves Ingress) is healthy
+            # even while the CodexBar backend is still starting, so always 200
+            # and report backend state in the payload.
+            status, body, _content_type = proxy_get("/health" + query, timeout=10)
+            payload: dict[str, object] = {"ok": True, "backendStatus": status}
+            try:
+                backend = json.loads(body.decode("utf-8"))
+            except Exception:  # noqa: BLE001
+                backend = body.decode("utf-8", errors="replace")[:500]
+            payload["backend"] = backend
+            if isinstance(backend, dict) and backend.get("version"):
+                payload["version"] = backend["version"]
+            self.send_json(payload, 200)
+            return
+        if path in ("/usage", "/cost"):
             status, body, content_type = proxy_get(path + query)
             self.send_bytes(body, status, content_type)
             return
@@ -500,7 +584,7 @@ class Handler(BaseHTTPRequestHandler):
                 payload = body.decode("utf-8", errors="replace")
             self.send_json({"ok": 200 <= status < 300, "status": status, "provider": provider, "payload": payload}, 200 if status < 500 else 502)
             return
-        self.send_json({"error": "not found"}, 404)
+        self.send_json({"error": f"not found: GET {path}"}, 404)
 
     def do_POST(self) -> None:  # noqa: N802
         if self.reject_forbidden_client():
@@ -509,7 +593,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             payload = self.read_json_body()
         except Exception as exc:  # noqa: BLE001
-            self.send_json({"ok": False, "error": f"Invalid JSON: {exc}"}, 400)
+            self.send_json({"ok": False, "error": f"Invalid JSON body for {parsed.path}: {exc}"}, 400)
             return
         if parsed.path == "/api/config":
             data = payload.get("config") if isinstance(payload, dict) and "config" in payload else payload
@@ -535,6 +619,21 @@ class Handler(BaseHTTPRequestHandler):
                 return
             self.send_json({"ok": True, "session": session.status()})
             return
+        if parsed.path == "/api/login/input":
+            if not isinstance(payload, dict):
+                self.send_json({"ok": False, "error": "Expected JSON object"}, 400)
+                return
+            session = get_login_session(str(payload.get("id", "")), self.client_address[0])
+            if not session:
+                self.send_json({"ok": False, "error": "login session not found"}, 404)
+                return
+            try:
+                session.send_input(str(payload.get("text", "")))
+            except Exception as exc:  # noqa: BLE001
+                self.send_json({"ok": False, "error": str(exc)}, 400)
+                return
+            self.send_json({"ok": True, "session": session.status()})
+            return
         if parsed.path == "/api/login/cancel":
             if not isinstance(payload, dict):
                 self.send_json({"ok": False, "error": "Expected JSON object"}, 400)
@@ -546,24 +645,16 @@ class Handler(BaseHTTPRequestHandler):
             session.cancel()
             self.send_json({"ok": True, "session": session.status()})
             return
-        if parsed.path == "/api/auth-upload":
-            if not isinstance(payload, dict):
-                self.send_json({"ok": False, "error": "Expected JSON object"}, 400)
-                return
-            try:
-                result = write_auth_file(str(payload.get("provider", "")), str(payload.get("content", "")))
-            except Exception as exc:  # noqa: BLE001
-                self.send_json({"ok": False, "error": str(exc)}, 400)
-                return
-            self.send_json({"ok": True, "auth": result})
-            return
-        self.send_json({"ok": False, "error": "not found"}, 404)
+        self.send_json({"ok": False, "error": f"not found: POST {parsed.path}"}, 404)
 
 
 def main() -> None:
     host = os.environ.get("CODEXBAR_SETUP_HOST", "0.0.0.0")
     port = int(os.environ.get("CODEXBAR_SETUP_PORT", "8099"))
+    ensure_auth_dirs()
+    ensure_basic_config()
     httpd = ThreadingHTTPServer((host, port), Handler)
+    httpd.daemon_threads = True
     print(f"CodexBar setup UI listening on http://{host}:{port}", flush=True)
     httpd.serve_forever()
 

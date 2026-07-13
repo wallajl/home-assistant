@@ -1,22 +1,13 @@
 configuration:
   codexbar_version:
     name: CodexBar version
-    description: Upstream CodexBar CLI release version to install, without the leading v.
-  default_provider:
-    name: Default provider
-    description: Provider query used by the background API server and dashboard.
+    description: Upstream CodexBar CLI release version, without the leading v.
   refresh_interval:
     name: Refresh interval
-    description: CodexBar API response cache TTL in seconds. Set 0 to disable stale fallback caching.
+    description: Usage response cache time in seconds. Set 0 to disable caching.
   request_timeout:
     name: Request timeout
-    description: Per-request timeout in seconds. Set 0 to wait indefinitely.
+    description: Provider request timeout in seconds. Set 0 to wait indefinitely.
   log_level:
     name: Log level
     description: CodexBar CLI log verbosity.
-  auto_seed_config:
-    name: Auto-seed config
-    description: Write provider_config_json into the persistent CodexBar config file on start.
-  provider_config_json:
-    name: Provider config JSON
-    description: Raw CodexBar config JSON object. Secrets are stored in the add-on options and config file.

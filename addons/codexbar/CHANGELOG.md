@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0
+
+- Reset the add-on to a focused Codex + Claude experience.
+- Remove API-key providers, manual OAuth upload, raw provider configuration, and unrelated setup controls.
+- Add container-safe Codex device-code and Claude URL/code login flows with visible URL, code, CLI output, and error diagnostics.
+- Handle Home Assistant Ingress base paths and chunked POST bodies.
+- Show Codex and Claude usage/cost together in one sidebar panel.
+
+## 0.3.3
+
+- Decode chunked request bodies from the Home Assistant ingress proxy so Save/Login/Cancel POSTs no longer fail with "Invalid JSON" from the real HA menu.
+- Inject the ingress base path (`X-Ingress-Path`) into the UI as a `<base>` tag so API calls resolve with or without a trailing slash in the browser URL.
+- Strip OSC terminal hyperlink escapes from login output so the Claude OAuth URL is extracted cleanly instead of doubled/corrupted.
+- Add a code-paste box wired to the login CLI's stdin so `claude auth login` ("Paste code here if prompted >") can actually complete.
+- Show the Codex one-time device code prominently and detect when the CLI is waiting for input.
+- Create `/config/.codex` and `/config/.claude` before starting logins (Codex CLI exits immediately if its home directory is missing).
+- Report every failed UI request with its endpoint, HTTP status, and message; the watchdog `/health` endpoint now reflects setup-UI health with backend state in the payload instead of restarting the add-on while the backend warms up.
+
 ## 0.3.2
 
 - Make setup UI API calls resolve correctly when Home Assistant opens the add-on through an ingress menu URL without a trailing slash.

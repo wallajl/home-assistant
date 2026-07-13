@@ -2,61 +2,46 @@
 
 ## What it does
 
-- Downloads the selected CodexBar CLI release for your Home Assistant architecture.
-- Runs `codexbar serve` on `127.0.0.1:8080` for usage/cost JSON.
-- Serves a Home Assistant Ingress setup wizard and dashboard on port `8099`.
-- Lets you enable providers, paste API keys/cookies/base URLs, save config, validate it, and test providers from the browser.
-- Persists CodexBar config under the add-on configuration mount.
+This focused Home Assistant add-on shows **OpenAI Codex** and **Claude** subscription usage together. It uses CodexBar as the usage engine and exposes only a Home Assistant Ingress panel—no host port or desktop browser is required inside the container.
 
-## First setup
+## Setup
 
 1. Install and start the add-on.
-2. Open the add-on Web UI.
-3. In **Setup wizard**, enable providers such as Codex, Claude, OpenAI, OpenRouter, LiteLLM, or LLM Proxy.
-4. Paste only the credentials needed for that provider.
-5. Press **Save setup**.
-6. Press **Test** on a provider or open the **Dashboard** tab.
+2. Enable **Show in sidebar** on the add-on page if Home Assistant has not added it automatically.
+3. Open **CodexBar** from the Home Assistant sidebar.
+4. Click **Log in to Codex**:
+   - the add-on runs `codex login --device-auth` inside its container;
+   - the panel displays `https://auth.openai.com/codex/device` and a one-time code;
+   - open the link and enter the displayed code.
+5. Click **Log in to Claude**:
+   - the add-on runs `claude auth login --claudeai` inside its container;
+   - the panel displays the Claude authorization URL;
+   - complete login and, if Claude returns a code, paste it into the panel.
+6. Press **Refresh usage**.
 
-The setup UI writes to:
+The official CLIs save credentials directly into persistent add-on storage:
 
-- `CODEXBAR_CONFIG=/config/codexbar/config.json`
-- `HOME=/config/home`
+- Codex: `/config/.codex/auth.json`
+- Claude: `/config/.claude/.credentials.json`
+- CodexBar config: `/config/codexbar/config.json`
 
-Before overwriting an existing config, the setup API creates a timestamped backup beside it.
+No credential file upload or manual JSON setup is required.
 
-## Local CLI credentials
+## Why login is shown as a URL/code
 
-Codex and Claude OAuth are not configured with normal API keys. CodexBar reads the OAuth files created by the normal CLI login flows.
+Home Assistant add-ons run in containers and cannot launch a desktop browser on your phone or computer. The panel therefore captures the official CLI URL/device code and displays it in Home Assistant. Codex uses a device code. Claude uses a browser URL and may ask you to paste an authorization code back into the panel.
 
-On a computer where you are already logged in:
+## Options
 
-- Codex OAuth file: `~/.codex/auth.json`
-- Claude OAuth file: `~/.claude/.credentials.json`
-
-The setup wizard can now start the Codex or Claude CLI inside the add-on and show you the browser login URL/code. Finish the provider login in your browser, then the CLI writes the OAuth file directly into add-on storage.
-
-Fallback: upload them in the setup wizard, or copy them into the add-on configuration storage so they appear inside the add-on container as:
-
-- Codex files: `/config/.codex`
-- Claude files: `/config/.claude`
-
-Then restart the add-on and use the dashboard provider source `auto` or `oauth`.
-
-If you want organization-level Claude Admin API spend instead of your Claude OAuth account limits, use an Anthropic Admin API key (`sk-ant-admin...`) in the Claude provider card. Codex does not have a useful API-key setup for ChatGPT/Codex subscription quota; use OAuth via `~/.codex/auth.json`.
-
-## Advanced configuration
-
-The add-on still supports the original add-on options:
-
-- `codexbar_version`: upstream CodexBar CLI release version to install.
-- `default_provider`: dashboard default provider.
+- `codexbar_version`: pinned upstream CodexBar CLI release.
 - `refresh_interval`: CodexBar response cache TTL.
-- `request_timeout`: per-request timeout.
-- `log_level`: CodexBar CLI verbosity.
-- `provider_config_json`: optional bootstrap JSON for first start or forced overwrite when `auto_seed_config` is enabled.
+- `request_timeout`: provider request timeout.
+- `log_level`: CodexBar logging level.
 
-For day-to-day setup, prefer the Web UI over editing `provider_config_json`.
+## Troubleshooting
+
+Open **Login details** or **Diagnostics** in the panel. Request failures include the endpoint and HTTP status. The add-on logs also show whether the Python Ingress UI, CodexBar backend, or provider CLI failed.
 
 ## Security
 
-The CodexBar API has no built-in authentication. This add-on intentionally exposes it through Home Assistant Ingress and does not publish a host port. Treat provider API keys, OAuth tokens, and cookie headers as secrets.
+The add-on is available only through authenticated Home Assistant Ingress and does not publish a host port. OAuth tokens remain under the add-on's persistent `/config` storage. Treat displayed one-time codes and authorization URLs as temporary secrets.

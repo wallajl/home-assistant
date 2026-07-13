@@ -2,395 +2,220 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <base href="./">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CodexBar Setup</title>
+  <title>Codex + Claude Usage</title>
   <style>
-    :root { color-scheme: dark; --bg:#09090b; --card:#14141a; --soft:#1d1d27; --muted:#a1a1aa; --fg:#f4f4f5; --line:#2d2d38; --ok:#16d3b4; --warn:#f59e0b; --bad:#fb7185; --blue:#60a5fa; }
-    * { box-sizing: border-box; }
-    body { margin:0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: radial-gradient(circle at 15% 0%, #132544 0, transparent 34%), radial-gradient(circle at 85% 10%, #14342f 0, transparent 28%), var(--bg); color:var(--fg); }
-    main { max-width: 1180px; margin: 0 auto; padding: 28px 18px 56px; }
-    header { display:flex; align-items:flex-end; justify-content:space-between; gap: 16px; margin-bottom: 22px; }
-    h1 { margin:0; font-size: clamp(34px, 6vw, 62px); letter-spacing:-0.07em; }
-    h2 { margin: 24px 0 12px; letter-spacing:-0.03em; }
-    h3 { margin:0 0 8px; }
-    .sub, .muted { color:var(--muted); }
-    .tabs, .controls, .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-    .tabs { margin: 18px 0; }
-    button, select, input, textarea { background:#111827; color:var(--fg); border:1px solid #334155; border-radius: 12px; padding: 10px 12px; font: inherit; }
-    input, textarea, select { width: 100%; }
-    textarea { min-height: 120px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
-    button { cursor:pointer; font-weight: 750; }
-    button.primary { background: linear-gradient(135deg, var(--ok), var(--blue)); color:#03110f; border:0; }
-    button.ghost { background:#15151e; }
-    button.active { outline: 2px solid var(--ok); }
-    .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px; }
-    .card { background: color-mix(in srgb, var(--card) 94%, transparent); border:1px solid var(--line); border-radius: 22px; padding: 18px; box-shadow: 0 20px 60px #0007; }
-    .provider { display:grid; gap: 12px; }
-    .provider.enabled { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); }
-    .provider-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
-    .pill { font-size:12px; color:#061512; background:var(--ok); border-radius:999px; padding:4px 8px; white-space:nowrap; }
-    .warn { background: rgba(245,158,11,.13); border-color: rgba(245,158,11,.35); }
-    .error { border-color: color-mix(in srgb, var(--bad) 60%, var(--line)); }
-    .ok { border-color: color-mix(in srgb, var(--ok) 60%, var(--line)); }
-    .field { display:grid; gap:6px; }
-    label { color:var(--muted); font-size: 13px; }
-    .bar { height: 12px; background:#27272f; border-radius:999px; overflow:hidden; margin: 8px 0 4px; }
-    .fill { height:100%; background:linear-gradient(90deg, var(--ok), var(--blue)); border-radius:inherit; }
-    dl { display:grid; grid-template-columns: 1fr auto; gap: 8px 12px; margin: 12px 0 0; }
-    dt { color:var(--muted); } dd { margin:0; text-align:right; font-variant-numeric: tabular-nums; }
-    pre { white-space: pre-wrap; overflow:auto; max-height:420px; background:#050507; border:1px solid var(--line); border-radius:18px; padding:14px; }
-    .hidden { display:none !important; }
-    .status { margin: 12px 0; }
-    .two { display:grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap:14px; }
-    @media (max-width: 760px) { header, .two { grid-template-columns: 1fr; display:grid; } }
+    :root { color-scheme:dark; --bg:#09090b; --card:#15151b; --soft:#20202a; --line:#30303c; --fg:#f4f4f5; --muted:#a1a1aa; --ok:#2dd4bf; --blue:#60a5fa; --warn:#f59e0b; --bad:#fb7185; }
+    * { box-sizing:border-box }
+    body { margin:0; min-height:100vh; background:radial-gradient(circle at 15% 0,#132544 0,transparent 34%),radial-gradient(circle at 90% 5%,#14342f 0,transparent 28%),var(--bg); color:var(--fg); font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif }
+    main { max-width:1080px; margin:auto; padding:24px 16px 56px }
+    header { display:flex; justify-content:space-between; align-items:flex-end; gap:16px; margin-bottom:18px }
+    h1 { margin:0; font-size:clamp(32px,7vw,60px); letter-spacing:-.06em }
+    h2 { margin:26px 0 12px } h3 { margin:0 0 8px }
+    .muted { color:var(--muted) }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px }
+    .card { background:color-mix(in srgb,var(--card) 95%,transparent); border:1px solid var(--line); border-radius:20px; padding:18px; box-shadow:0 18px 50px #0006 }
+    .ok { border-color:color-mix(in srgb,var(--ok) 65%,var(--line)) }
+    .warn { border-color:color-mix(in srgb,var(--warn) 55%,var(--line)) }
+    .error { border-color:color-mix(in srgb,var(--bad) 65%,var(--line)) }
+    .row { display:flex; flex-wrap:wrap; align-items:center; gap:8px }
+    button,a.button,input { border:1px solid #334155; border-radius:12px; padding:10px 13px; font:inherit }
+    button,a.button { cursor:pointer; color:var(--fg); background:#161622; font-weight:750; text-decoration:none }
+    button.primary,a.button.primary { border:0; color:#04110f; background:linear-gradient(135deg,var(--ok),var(--blue)) }
+    button:disabled { opacity:.55; cursor:not-allowed }
+    input { color:var(--fg); background:#0b1220; min-width:min(100%,420px) }
+    .pill { display:inline-block; border-radius:999px; padding:4px 9px; color:#051310; background:var(--ok); font-size:12px; font-weight:800 }
+    .login-panel { margin-top:14px }
+    .code { margin:12px 0; padding:14px; background:#050507; border:1px solid var(--line); border-radius:14px; font-size:clamp(24px,6vw,38px); font-weight:900; letter-spacing:.1em; text-align:center; user-select:all }
+    .plain-url { display:block; margin:10px 0; overflow-wrap:anywhere; color:#93c5fd; user-select:all }
+    pre { white-space:pre-wrap; overflow:auto; max-height:300px; background:#050507; border:1px solid var(--line); border-radius:14px; padding:12px }
+    .hidden { display:none!important }
+    .bar { height:11px; margin:7px 0 4px; overflow:hidden; background:#292933; border-radius:999px }
+    .fill { height:100%; background:linear-gradient(90deg,var(--ok),var(--blue)); border-radius:inherit }
+    dl { display:grid; grid-template-columns:1fr auto; gap:8px 12px; margin:12px 0 0 }
+    dt { color:var(--muted) } dd { margin:0; text-align:right; font-variant-numeric:tabular-nums }
+    #message { margin-bottom:14px }
+    @media(max-width:640px){ header{align-items:stretch;display:grid} header .row button{flex:1} }
   </style>
 </head>
 <body>
 <main>
   <header>
-    <div>
-      <h1>CodexBar</h1>
-      <div class="sub">Setup and monitor AI coding quotas from Home Assistant.</div>
-    </div>
-    <div class="controls">
-      <button id="saveTop" class="primary">Save setup</button>
-      <button id="refresh" class="ghost">Refresh data</button>
-    </div>
+    <div><h1>Codex + Claude</h1><div class="muted">Subscription usage in one Home Assistant panel.</div></div>
+    <div class="row"><button id="refresh">Refresh usage</button></div>
   </header>
 
-  <nav class="tabs">
-    <button class="tab active" data-tab="setup">Setup wizard</button>
-    <button class="tab" data-tab="dashboard">Dashboard</button>
-    <button class="tab" data-tab="advanced">Advanced JSON</button>
-  </nav>
+  <section id="message" class="card muted">Starting…</section>
 
-  <section id="message" class="card status muted">Loading configuration…</section>
-
-  <section id="setupTab">
-    <section class="card warn">
-      <h3>Quick path</h3>
-      <ol>
-        <li>Enable the providers you care about below.</li>
-        <li>Paste API keys/cookies only where needed. Leave local CLI providers blank if you will copy auth files into the add-on config folder.</li>
-        <li>Press <strong>Save setup</strong>, then <strong>Test</strong> a provider.</li>
-      </ol>
-      <p class="muted">Config is written to <code id="configPath">/config/codexbar/config.json</code> with 0600 permissions. Secrets stay inside this add-on container/config storage.</p>
-    </section>
-
-    <section class="card ok" style="margin-top:14px">
-      <h3>OAuth login</h3>
-      <p>Codex and Claude subscription limits use OAuth, not normal API keys.</p>
-      <p class="muted">Click login. The add-on starts the provider CLI, captures the one-time browser URL/code, and saves the OAuth files after you finish in your browser.</p>
-      <div id="authStatus" class="grid"></div>
-      <div class="controls" style="margin-top:10px">
-        <button type="button" id="loginCodex" class="primary">Login to Codex</button>
-        <button type="button" id="loginClaude" class="primary">Login to Claude</button>
-        <a href="https://openrouter.ai/settings/keys" target="_blank"><button type="button" class="ghost">Open OpenRouter keys</button></a>
-      </div>
-      <div id="loginBox" class="hidden" style="margin-top:12px">
-        <h3 id="loginTitle">Login running…</h3>
-        <p id="loginHint" class="muted">Waiting for login URL/code…</p>
-        <div class="controls"><a id="loginUrl" href="#" target="_blank" class="hidden"><button type="button" class="primary">Open login page</button></a><button type="button" id="cancelLogin" class="ghost">Cancel login</button></div>
-        <pre id="loginOutput"></pre>
-      </div>
-      <details style="margin-top:12px">
-        <summary class="muted">Fallback: upload existing OAuth files</summary>
-        <div class="two" style="margin-top:12px">
-          <div class="field"><label>Codex <code>~/.codex/auth.json</code></label><input id="codexAuthFile" type="file" accept="application/json,.json" /></div>
-          <div class="field"><label>Claude <code>~/.claude/.credentials.json</code></label><input id="claudeAuthFile" type="file" accept="application/json,.json" /></div>
-        </div>
-      </details>
-    </section>
-
-    <h2>Providers</h2>
-    <section id="providerGrid" class="grid"></section>
-
-    <section class="card" style="margin-top:14px">
-      <h3>Local CLI auth files</h3>
-      <p class="muted">Codex and Claude often need local CLI credential files instead of API keys. Copy them into the add-on config storage, then restart this add-on.</p>
-      <pre>Codex files:  /config/.codex
-Claude files: /config/.claude
-CodexBar config: /config/codexbar/config.json</pre>
-    </section>
+  <section class="grid">
+    <article id="codexAuth" class="card warn">
+      <h3>OpenAI Codex</h3>
+      <p class="muted">ChatGPT subscription usage through the official device-code login.</p>
+      <p id="codexStatus">Checking login…</p>
+      <button id="loginCodex" class="primary">Log in to Codex</button>
+    </article>
+    <article id="claudeAuth" class="card warn">
+      <h3>Claude</h3>
+      <p class="muted">Claude subscription usage through the official Claude login.</p>
+      <p id="claudeStatus">Checking login…</p>
+      <button id="loginClaude" class="primary">Log in to Claude</button>
+    </article>
   </section>
 
-  <section id="dashboardTab" class="hidden">
-    <div class="controls">
-      <select id="provider">
-        <option value="all">all providers</option>
-        <option value="both">codex + claude</option>
-        <option value="codex">codex</option>
-        <option value="claude">claude</option>
-        <option value="openai">openai</option>
-        <option value="openrouter">openrouter</option>
-        <option value="litellm">litellm</option>
-        <option value="llmproxy">llmproxy</option>
-        <option value="gemini">gemini</option>
-        <option value="copilot">copilot</option>
-      </select>
-      <button id="refreshDash" class="ghost">Refresh dashboard</button>
+  <section id="loginPanel" class="card login-panel hidden">
+    <h3 id="loginTitle">Login</h3>
+    <p id="loginHint" class="muted">Waiting for the provider CLI…</p>
+    <div id="loginCode" class="code hidden"></div>
+    <a id="loginUrl" class="button primary hidden" target="_blank" rel="noopener">Open login page</a>
+    <span id="loginUrlText" class="plain-url hidden"></span>
+    <div id="loginInputRow" class="row hidden">
+      <input id="loginInput" autocomplete="off" spellcheck="false" placeholder="Paste the code from the Claude page" />
+      <button id="sendLoginInput" class="primary">Send code</button>
     </div>
-    <h2>Usage</h2>
-    <section id="usage" class="grid"></section>
-    <h2>Cost</h2>
-    <section id="cost" class="grid"></section>
+    <div class="row" style="margin-top:10px"><button id="cancelLogin">Cancel login</button></div>
+    <details style="margin-top:12px"><summary class="muted">Login details</summary><pre id="loginOutput">No output yet.</pre></details>
   </section>
 
-  <section id="advancedTab" class="hidden">
-    <div class="two">
-      <section class="card">
-        <h3>Raw CodexBar config</h3>
-        <p class="muted">For providers not shown in the wizard, edit the JSON directly. It follows CodexBar's normal config schema.</p>
-        <textarea id="rawJson" spellcheck="false"></textarea>
-        <div class="controls" style="margin-top:10px">
-          <button id="formatJson" class="ghost">Format JSON</button>
-          <button id="saveRaw" class="primary">Save JSON</button>
-          <button id="validate" class="ghost">Validate</button>
-        </div>
-      </section>
-      <section class="card">
-        <h3>Validation output</h3>
-        <pre id="validationOutput">No validation run yet.</pre>
-      </section>
-    </div>
-  </section>
+  <h2>Usage</h2>
+  <section id="usage" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
+
+  <h2>Cost</h2>
+  <section id="cost" class="grid"><article class="card muted">Waiting for CodexBar…</article></section>
+
+  <details class="card" style="margin-top:20px"><summary>Diagnostics</summary><pre id="diagnostics">No diagnostics yet.</pre></details>
 </main>
-
 <script>
-const $ = (id) => document.getElementById(id);
-const apiUrl = (path) => new URL(path, window.location.href.endsWith('/') ? window.location.href : window.location.href + '/').toString();
-let config = { version: 1, providers: [] };
-let presets = [];
-
-const fmtDate = (value) => value ? new Date(value).toLocaleString() : '—';
-const pct = (value) => Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 0;
-const money = (value) => Number.isFinite(value) ? '$' + value.toFixed(2) : '—';
-const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-function asArray(payload) { return Array.isArray(payload) ? payload : [payload]; }
-function providerName(p) { return (p.provider || p.providerID || 'provider').replaceAll('_', ' '); }
-function providerEntry(id) { return (config.providers ||= []).find(p => p.id === id); }
-function ensureProvider(id) { let p = providerEntry(id); if (!p) { p = { id, enabled: false, source: 'auto' }; config.providers.push(p); } return p; }
-function setMessage(text, cls='muted') { $('message').className = `card status ${cls}`; $('message').innerHTML = text; }
-
+const $ = id => document.getElementById(id);
+const esc = value => String(value ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const apiUrl = path => new URL(path, document.baseURI).toString();
 let activeLoginId = null;
-let loginPollTimer = null;
+let loginTimer = null;
 
-async function startLogin(provider) {
-  setMessage(`Starting ${provider} login…`);
-  $('loginBox').classList.remove('hidden');
-  $('loginTitle').textContent = `${provider} login running`;
-  $('loginHint').textContent = 'Waiting for the CLI to print a login URL or code…';
-  $('loginOutput').textContent = '';
-  $('loginUrl').classList.add('hidden');
-  const res = await fetch(apiUrl('api/login/start'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider}) });
-  const data = await res.json();
-  if (!res.ok || !data.ok) { setMessage(`Could not start ${provider} login: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
-  activeLoginId = data.session.id;
-  await pollLogin();
-  if (loginPollTimer) clearInterval(loginPollTimer);
-  loginPollTimer = setInterval(pollLogin, 1500);
+function message(text, kind='muted') { $('message').className=`card ${kind}`; $('message').textContent=text; }
+function diagnostic(label, value) { $('diagnostics').textContent=`${label}\n${typeof value==='string'?value:JSON.stringify(value,null,2)}`; }
+
+async function api(path, options={}) {
+  let response, text;
+  try { response=await fetch(apiUrl(path),options); text=await response.text(); }
+  catch(error) { throw new Error(`${path}: request failed: ${error.message}`); }
+  let data={};
+  if(text){ try{data=JSON.parse(text)}catch{throw new Error(`${path}: HTTP ${response.status} returned non-JSON: ${text.slice(0,180)}`)} }
+  if(!response.ok) throw Object.assign(new Error(`${path}: HTTP ${response.status}: ${data.error||data.message||response.statusText}`),{data,status:response.status});
+  return data;
 }
+const post=(path,body)=>api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 
-async function pollLogin() {
-  if (!activeLoginId) return;
-  const res = await fetch(apiUrl(`api/login/status?id=${encodeURIComponent(activeLoginId)}`));
-  const data = await res.json();
-  if (!res.ok) { setMessage(`Login status failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
-  $('loginOutput').textContent = data.output || 'No CLI output yet.';
-  if (data.url) {
-    $('loginUrl').href = data.url;
-    $('loginUrl').classList.remove('hidden');
-    $('loginHint').innerHTML = `Open this login URL, finish sign-in, then return here. If the browser did not open, copy the URL/code from the output below.`;
-  }
-  if (data.done) {
-    clearInterval(loginPollTimer); loginPollTimer = null;
-    await loadAuthStatus();
-    setMessage(data.ok ? `${data.provider} login completed.` : `${data.provider} login stopped: ${esc(data.error || 'check output')}`, data.ok ? 'ok' : 'error');
-  }
-}
-
-async function cancelLogin() {
-  if (!activeLoginId) return;
-  await fetch(apiUrl('api/login/cancel'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({id: activeLoginId}) });
-  if (loginPollTimer) clearInterval(loginPollTimer);
-  loginPollTimer = null;
-  activeLoginId = null;
-  setMessage('Login cancelled.', 'muted');
-}
-
-async function loadAuthStatus() {
-  try {
-    const res = await fetch(apiUrl('api/auth-status'));
-    const data = await res.json();
-    $('authStatus').innerHTML = ['codex','claude'].map(provider => {
-      const item = data[provider] || {};
-      return `<article class="card ${item.ok ? 'ok' : 'warn'}"><h3>${provider}</h3><p>${esc(item.message || 'Unknown')}</p><p class="muted">${esc(item.path || '')}</p></article>`;
-    }).join('');
-  } catch (e) {
-    $('authStatus').innerHTML = `<article class="card error">Could not load OAuth status: ${esc(e.message)}</article>`;
-  }
-}
-
-async function uploadAuthFile(provider, file) {
-  if (!file) return;
-  const content = await file.text();
-  const res = await fetch(apiUrl('api/auth-upload'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({provider, content}) });
-  const data = await res.json();
-  if (!res.ok || !data.ok) { setMessage(`${provider} OAuth upload failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
-  $(`${provider}AuthFile`).value = '';
-  setMessage(`${provider} OAuth file saved. Restart the add-on if the provider was already failing.`, 'ok');
-  await loadAuthStatus();
-}
-
-function renderProviders() {
-  $('providerGrid').innerHTML = presets.map(preset => {
-    const p = providerEntry(preset.id) || { id: preset.id, enabled: false, source: preset.defaultSource || 'auto' };
-    const fieldHtml = (preset.fields || []).map(field => {
-      const labels = { apiKey: 'API key / token', cookieHeader: 'Manual Cookie header', enterpriseHost: 'Server / Base URL', workspaceID: 'Workspace / Project ID' };
-      const type = field === 'apiKey' || field === 'cookieHeader' ? 'password' : 'text';
-      return `<div class="field"><label>${labels[field] || field}</label><input data-provider="${preset.id}" data-field="${field}" type="${type}" value="${esc(p[field] || '')}" placeholder="optional" /></div>`;
-    }).join('');
-    return `<article class="card provider ${p.enabled ? 'enabled' : ''}">
-      <div class="provider-head"><div><h3>${esc(preset.name)}</h3><div class="muted">${esc(preset.auth)}</div></div><span class="pill">${esc(preset.id)}</span></div>
-      <p class="muted">${esc(preset.help)}</p>
-      <div class="row"><label><input data-provider="${preset.id}" data-field="enabled" type="checkbox" ${p.enabled ? 'checked' : ''} style="width:auto"> Enable</label></div>
-      <div class="field"><label>Source</label><select data-provider="${preset.id}" data-field="source">
-        ${['auto','api','oauth','web','cli'].map(v => `<option value="${v}" ${((p.source || preset.defaultSource || 'auto') === v) ? 'selected' : ''}>${v}</option>`).join('')}
-      </select></div>
-      ${fieldHtml}
-      <div class="controls"><button class="ghost test-provider" data-test-provider="${preset.id}">Save + test ${esc(preset.name)}</button></div>
-    </article>`;
-  }).join('');
-}
-
-function syncFromForm() {
-  document.querySelectorAll('[data-provider][data-field]').forEach(el => {
-    const p = ensureProvider(el.dataset.provider);
-    const field = el.dataset.field;
-    if (field === 'enabled') p.enabled = el.checked;
-    else {
-      const value = el.value.trim();
-      if (value) p[field] = value;
-      else delete p[field];
+async function loadAuth(){
+  try{
+    const status=await api('api/auth-status');
+    for(const provider of ['codex','claude']){
+      const item=status[provider]||{};
+      $(`${provider}Auth`).className=`card ${item.ok?'ok':'warn'}`;
+      $(`${provider}Status`).textContent=item.ok?'Logged in':(item.message||'Not logged in');
+      $(`login${provider[0].toUpperCase()+provider.slice(1)}`).textContent=item.ok?'Log in again':`Log in to ${provider==='codex'?'Codex':'Claude'}`;
     }
-  });
-  config.providers = (config.providers || []).filter(p => p.id || p.enabled);
-  $('rawJson').value = JSON.stringify(config, null, 2);
+  }catch(error){ message(`Could not check login status: ${error.message}`,'error'); diagnostic('Auth status failed',error.message); }
 }
 
-async function loadConfig() {
-  await loadAuthStatus();
-  const res = await fetch(apiUrl('api/config'));
-  const data = await res.json();
-  config = data.config || { version: 1, providers: [] };
-  if (!Array.isArray(config.providers)) config.providers = [];
-  presets = data.presets || [];
-  $('configPath').textContent = data.path || '/config/codexbar/config.json';
-  $('rawJson').value = JSON.stringify(config, null, 2);
-  renderProviders();
-  setMessage('Setup loaded. Enable providers, save, then test.', 'ok');
+function resetLoginPanel(provider){
+  $('loginPanel').classList.remove('hidden');
+  $('loginTitle').textContent=`${provider==='codex'?'OpenAI Codex':'Claude'} login`;
+  $('loginHint').textContent='Waiting for the provider to return a browser URL…';
+  $('loginCode').classList.add('hidden');
+  $('loginUrl').classList.add('hidden');
+  $('loginUrlText').classList.add('hidden');
+  $('loginInputRow').classList.add('hidden');
+  $('loginOutput').textContent='Starting login process…';
 }
 
-async function saveConfig(source='form') {
-  try {
-    if (source === 'raw') config = JSON.parse($('rawJson').value);
-    else syncFromForm();
-  } catch (e) { setMessage(`JSON error: ${esc(e.message)}`, 'error'); return; }
-  const res = await fetch(apiUrl('api/config'), { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({config}) });
-  const data = await res.json();
-  if (!res.ok || !data.ok) { setMessage(`Save failed: ${esc(data.error || JSON.stringify(data))}`, 'error'); return; }
-  $('validationOutput').textContent = JSON.stringify(data.validation || data, null, 2);
-  setMessage(`Saved setup to ${esc(data.path)}${data.backup ? ` · backup ${esc(data.backup)}` : ''}`, 'ok');
-  await loadConfig();
+async function startLogin(provider){
+  if(loginTimer) clearInterval(loginTimer);
+  resetLoginPanel(provider);
+  message(`Starting ${provider} login…`);
+  try{
+    const data=await post('api/login/start',{provider});
+    activeLoginId=data.session.id;
+    await pollLogin();
+    loginTimer=setInterval(pollLogin,1200);
+  }catch(error){ message(`Could not start ${provider} login: ${error.message}`,'error'); diagnostic('Login start failed',error.data||error.message); }
 }
 
-async function validateConfig() {
-  syncFromForm();
-  const res = await fetch(apiUrl('api/validate'));
-  const data = await res.json();
-  $('validationOutput').textContent = JSON.stringify(data, null, 2);
-  setMessage(data.ok ? 'Config structure is valid.' : `Validation failed: ${esc(data.message)}`, data.ok ? 'ok' : 'error');
+async function pollLogin(){
+  if(!activeLoginId)return;
+  try{
+    const data=await api(`api/login/status?id=${encodeURIComponent(activeLoginId)}`);
+    $('loginOutput').textContent=data.output||'Waiting for CLI output…';
+    if(data.url){
+      $('loginUrl').href=data.url; $('loginUrl').classList.remove('hidden');
+      $('loginUrlText').textContent=data.url; $('loginUrlText').classList.remove('hidden');
+      $('loginHint').textContent=data.provider==='codex'?'Open the page and enter the code shown below.':'Open the page and sign in. If Claude gives you a code, paste it below.';
+      message(`${data.provider==='codex'?'Codex':'Claude'} login link is ready.`,'ok');
+    }
+    if(data.code){ $('loginCode').textContent=data.code; $('loginCode').classList.remove('hidden'); }
+    $('loginInputRow').classList.toggle('hidden',!(data.awaitingInput&&!data.done));
+    if(data.done){
+      clearInterval(loginTimer); loginTimer=null;
+      await loadAuth();
+      message(data.ok?`${data.provider} login complete.`:`${data.provider} login failed: ${data.error||'see login details'}`,data.ok?'ok':'error');
+      diagnostic('Last login result',data);
+    }
+  }catch(error){ message(`Login status check failed; retrying: ${error.message}`,'error'); diagnostic('Login status failed',error.data||error.message); }
 }
 
-function windowBlock(label, win) {
-  if (!win) return '';
-  const used = Number(win.usedPercent);
-  const remaining = Number.isFinite(used) ? 100 - used : Number(win.remainingPercent);
-  const shown = Number.isFinite(remaining) ? remaining : 0;
-  return `<dt>${label}</dt><dd>${Math.round(shown)}% left</dd><dt></dt><dd><div class="bar"><div class="fill" style="width:${pct(shown)}%"></div></div></dd><dt>Reset</dt><dd>${fmtDate(win.resetsAt)}</dd>`;
-}
-function usageCard(p) {
-  if (p.error) return `<article class="card error"><h3>${esc(providerName(p))}</h3><p>${esc(p.error.message || JSON.stringify(p.error))}</p></article>`;
-  const usage = p.usage || {};
-  const identity = usage.identity || {};
-  return `<article class="card"><h3>${esc(providerName(p))} <span class="pill">${esc(p.source || 'source')}</span></h3><dl>
-    ${windowBlock('Session', usage.primary)}${windowBlock('Weekly', usage.secondary)}${windowBlock('Monthly', usage.tertiary)}
-    <dt>Account</dt><dd>${esc(usage.accountEmail || identity.accountEmail || p.account || '—')}</dd>
-    <dt>Updated</dt><dd>${fmtDate(usage.updatedAt || p.updatedAt)}</dd>
-  </dl></article>`;
-}
-function costCard(p) {
-  if (p.error) return `<article class="card error"><h3>${esc(providerName(p))}</h3><p>${esc(p.error.message || JSON.stringify(p.error))}</p></article>`;
-  const totals = p.totals || {};
-  return `<article class="card"><h3>${esc(providerName(p))} <span class="pill">cost</span></h3><dl>
-    <dt>Session</dt><dd>${money(Number(p.sessionCostUSD))}</dd>
-    <dt>Last 30 days</dt><dd>${money(Number(p.last30DaysCostUSD ?? totals.totalCost))}</dd>
-    <dt>Tokens</dt><dd>${Number(totals.totalTokens || p.last30DaysTokens || 0).toLocaleString()}</dd>
-    <dt>Updated</dt><dd>${fmtDate(p.updatedAt)}</dd>
-  </dl></article>`;
-}
-async function testProvider(provider) {
-  setMessage(`Testing ${esc(provider)}…`);
-  const res = await fetch(apiUrl(`api/test?provider=${encodeURIComponent(provider)}`));
-  const data = await res.json();
-  $('validationOutput').textContent = JSON.stringify(data, null, 2);
-  setMessage(data.ok ? `${provider} test OK.` : `${provider} test failed: ${esc(JSON.stringify(data.payload || data.error || data))}`, data.ok ? 'ok' : 'error');
-  showTab('advanced');
+async function sendLoginInput(){
+  const text=$('loginInput').value.trim();
+  if(!text||!activeLoginId)return;
+  try{ await post('api/login/input',{id:activeLoginId,text}); $('loginInput').value=''; $('loginInputRow').classList.add('hidden'); message('Code sent. Waiting for Claude…'); }
+  catch(error){ message(`Could not send code: ${error.message}`,'error'); diagnostic('Login input failed',error.data||error.message); }
 }
 
-async function loadDashboard(provider = $('provider').value) {
-  setMessage('Refreshing dashboard…');
-  const costProvider = ['codex', 'claude', 'both'].includes(provider) ? provider : 'both';
-  try {
-    const [health, usage, cost] = await Promise.all([
-      fetch(apiUrl('health')).then(r => r.json()),
-      fetch(apiUrl(`usage?provider=${encodeURIComponent(provider)}`)).then(r => r.json()).catch(e => ({error: String(e)})),
-      fetch(apiUrl(`cost?provider=${encodeURIComponent(costProvider)}`)).then(r => r.json()).catch(e => ({error: String(e)}))
-    ]);
-    setMessage(`API healthy${health.version ? ` · CodexBar ${esc(health.version)}` : ''} · ${new Date().toLocaleTimeString()}`, 'ok');
-    $('usage').innerHTML = asArray(usage).map(usageCard).join('') || '<p class="muted">No usage payload.</p>';
-    $('cost').innerHTML = cost.error ? `<article class="card error"><pre>${esc(cost.error)}</pre></article>` : asArray(cost).map(costCard).join('');
-  } catch (e) {
-    setMessage(`Dashboard failed: ${esc(e.message)}`, 'error');
-  }
+async function cancelLogin(){
+  if(activeLoginId){ try{await post('api/login/cancel',{id:activeLoginId})}catch(error){diagnostic('Cancel failed',error.data||error.message)} }
+  if(loginTimer)clearInterval(loginTimer); loginTimer=null; activeLoginId=null; message('Login cancelled.');
 }
 
-function showTab(name) {
-  ['setup','dashboard','advanced'].forEach(tab => {
-    $(`${tab}Tab`).classList.toggle('hidden', tab !== name);
-    document.querySelector(`.tab[data-tab="${tab}"]`).classList.toggle('active', tab === name);
-  });
-  if (name === 'dashboard') loadDashboard();
+const arr=value=>Array.isArray(value)?value:[value];
+const name=p=>(p.provider||p.providerID||'provider').replaceAll('_',' ');
+const date=value=>value?new Date(value).toLocaleString():'—';
+const percent=value=>Number.isFinite(Number(value))?Math.max(0,Math.min(100,Number(value))):0;
+function windowRows(label,win){
+  if(!win)return'';
+  const used=Number(win.usedPercent), remaining=Number.isFinite(used)?100-used:Number(win.remainingPercent), shown=Number.isFinite(remaining)?remaining:0;
+  return `<dt>${label}</dt><dd>${Math.round(shown)}% left</dd><dt></dt><dd><div class="bar"><div class="fill" style="width:${percent(shown)}%"></div></div></dd><dt>Reset</dt><dd>${date(win.resetsAt)}</dd>`;
+}
+function usageCard(p){
+  if(p.error)return`<article class="card error"><h3>${esc(name(p))}</h3><p>${esc(p.error.message||JSON.stringify(p.error))}</p></article>`;
+  const usage=p.usage||{}, identity=usage.identity||{};
+  return `<article class="card"><h3>${esc(name(p))} <span class="pill">${esc(p.source||'auto')}</span></h3><dl>${windowRows('Session',usage.primary)}${windowRows('Weekly',usage.secondary)}${windowRows('Monthly',usage.tertiary)}<dt>Account</dt><dd>${esc(usage.accountEmail||identity.accountEmail||p.account||'—')}</dd><dt>Updated</dt><dd>${date(usage.updatedAt||p.updatedAt)}</dd></dl></article>`;
+}
+function costCard(p){
+  if(p.error)return`<article class="card error"><h3>${esc(name(p))}</h3><p>${esc(p.error.message||JSON.stringify(p.error))}</p></article>`;
+  const totals=p.totals||{};
+  const usd=value=>Number.isFinite(Number(value))?'$'+Number(value).toFixed(2):'—';
+  return `<article class="card"><h3>${esc(name(p))}</h3><dl><dt>Session</dt><dd>${usd(p.sessionCostUSD)}</dd><dt>Last 30 days</dt><dd>${usd(p.last30DaysCostUSD??totals.totalCost)}</dd><dt>Tokens</dt><dd>${Number(totals.totalTokens||p.last30DaysTokens||0).toLocaleString()}</dd></dl></article>`;
 }
 
-document.addEventListener('input', e => { if (e.target.matches('[data-provider][data-field]')) syncFromForm(); });
-document.addEventListener('click', e => {
-  if (e.target.matches('.tab')) showTab(e.target.dataset.tab);
-  if (e.target.matches('.test-provider')) { const provider = e.target.dataset.testProvider; syncFromForm(); saveConfig().then(() => testProvider(provider)); }
-});
-$('saveTop').addEventListener('click', () => saveConfig());
-$('saveRaw').addEventListener('click', () => saveConfig('raw'));
-$('formatJson').addEventListener('click', () => { try { $('rawJson').value = JSON.stringify(JSON.parse($('rawJson').value), null, 2); } catch(e) { setMessage(`JSON error: ${esc(e.message)}`, 'error'); } });
-$('validate').addEventListener('click', validateConfig);
-$('refresh').addEventListener('click', () => loadDashboard());
-$('refreshDash').addEventListener('click', () => loadDashboard());
-$('provider').addEventListener('change', () => loadDashboard());
-$('loginCodex').addEventListener('click', () => startLogin('codex'));
-$('loginClaude').addEventListener('click', () => startLogin('claude'));
-$('cancelLogin').addEventListener('click', cancelLogin);
-$('codexAuthFile').addEventListener('change', e => uploadAuthFile('codex', e.target.files[0]));
-$('claudeAuthFile').addEventListener('change', e => uploadAuthFile('claude', e.target.files[0]));
-loadConfig().catch(e => setMessage(`Failed to load setup: ${esc(e.message)}`, 'error'));
+async function refreshUsage(){
+  message('Refreshing Codex and Claude usage…');
+  try{
+    const [health,usage,cost]=await Promise.all([api('health'),api('usage?provider=both'),api('cost?provider=both')]);
+    const backendOk=health.backendStatus>=200&&health.backendStatus<300;
+    $('usage').innerHTML=arr(usage).map(usageCard).join('')||'<article class="card muted">No usage data.</article>';
+    $('cost').innerHTML=arr(cost).map(costCard).join('')||'<article class="card muted">No cost data.</article>';
+    message(backendOk?`Updated ${new Date().toLocaleTimeString()}${health.version?` · CodexBar ${health.version}`:''}`:`CodexBar backend unavailable (HTTP ${health.backendStatus}).`,backendOk?'ok':'error');
+    diagnostic('Last dashboard response',{health,usage,cost});
+  }catch(error){ message(`Usage refresh failed: ${error.message}`,'error'); diagnostic('Usage refresh failed',error.data||error.message); }
+}
+
+$('loginCodex').addEventListener('click',()=>startLogin('codex'));
+$('loginClaude').addEventListener('click',()=>startLogin('claude'));
+$('sendLoginInput').addEventListener('click',sendLoginInput);
+$('loginInput').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sendLoginInput()}});
+$('cancelLogin').addEventListener('click',cancelLogin);
+$('refresh').addEventListener('click',refreshUsage);
+Promise.all([loadAuth(),refreshUsage()]).catch(error=>message(error.message,'error'));
+setInterval(refreshUsage,60000);
 </script>
 </body>
 </html>

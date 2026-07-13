@@ -1,5 +1,13 @@
-# CodexBar Home Assistant add-on
+# Codex + Claude usage for Home Assistant
 
-Runs the Linux CodexBar CLI HTTP server behind Home Assistant Ingress and adds a setup wizard plus dashboard for `/usage`, `/cost`, and `/health`.
+A focused Home Assistant Ingress add-on that shows OpenAI Codex and Claude subscription usage together using CodexBar.
 
-This add-on is experimental. It supports Home Assistant `amd64` and `aarch64` only, matching the CodexBar Linux musl release assets.
+Login happens entirely from the sidebar panel:
+
+- Codex displays the official browser URL and one-time device code.
+- Claude displays the official authorization URL and accepts the returned code when required.
+- Credentials persist inside add-on storage across restarts.
+
+No desktop launch inside the container, file upload, API-key provider setup, or manually edited JSON is required.
+
+Supported architectures: `amd64` and `aarch64`.
