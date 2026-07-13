@@ -37,6 +37,8 @@ No credential file upload or manual JSON setup is required.
 - Before each sample, `claude auth status --json` lets the official Claude CLI refresh its own OAuth credentials without sending a prompt or consuming model usage.
 - No fake or interpolated historical data is generated. A new installation starts with its first real sample and fills the graph over the following seven days.
 
+The add-on selects Claude's OAuth usage endpoint explicitly. On Linux, CodexBar's Swift credential reader resolves the passwd home directory (`/root`) rather than `$HOME`; the add-on links that container-only path back to the persistent `/config/.claude` directory. This keeps the official Claude CLI and CodexBar on the same durable credential file across restarts.
+
 ## Why login is shown as a URL/code
 
 Home Assistant add-ons run in containers and cannot launch a desktop browser on your phone or computer. The panel therefore captures the official CLI URL/device code and displays it in Home Assistant. Codex uses a device code. Claude uses a browser URL and may ask you to paste an authorization code back into the panel.
