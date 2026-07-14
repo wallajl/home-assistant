@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Use the Supervisor bridge address for the Home Assistant-hosted Meshtastic backup proxy.
+
 ## 0.1.0
 
 - Initial experimental one-use migration add-on.

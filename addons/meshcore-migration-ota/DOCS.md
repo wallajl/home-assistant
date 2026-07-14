@@ -29,7 +29,7 @@ This is an application-only cross-flash. It preserves the Meshtastic bootloader,
 1. Refresh the existing `https://github.com/wallajl/home-assistant` add-on repository.
 2. Install **MeshCore Migration OTA**.
 3. Leave automatic start disabled.
-4. Confirm the configured hosts. For this installation the Meshtastic backup endpoint is the Home Assistant proxy at `192.168.0.254:4403`; the post-flash MeshCore target remains `192.168.0.181:5000`.
+4. Confirm the configured hosts. For this installation the add-on reaches the Home Assistant Meshtastic proxy through the Supervisor bridge at `172.30.32.1:4403`; the post-flash MeshCore target remains `192.168.0.181:5000`.
 5. Start the add-on and open its Web UI.
 6. Keep the Home Assistant Meshtastic integration loaded while creating the private backup, because it owns the working local TCP proxy.
 7. Only after the backup succeeds, disable the Meshtastic integration before reboot-to-OTA and BLE discovery.
