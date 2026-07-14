@@ -1,0 +1,10 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+umask 077
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT
+export PATH="/opt/venv/bin:/usr/local/bin:/usr/bin:/bin"
+export PYTHONDONTWRITEBYTECODE=1
+
+cd /usr/share/meshcore-migration-ota
+bashio::log.warning "Experimental one-use OTA tool; keep USB recovery available"
+exec /opt/venv/bin/python3 -u -m app.server

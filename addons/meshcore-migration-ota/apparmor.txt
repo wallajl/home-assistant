@@ -1,0 +1,107 @@
+#include <tunables/global>
+
+profile meshcore_migration_ota flags=(attach_disconnected,mediate_deleted) {
+  #include <abstractions/base>
+  #include <abstractions/nameservice>
+
+  signal,
+  / r,
+  network inet stream,
+  network inet6 stream,
+  network unix stream,
+
+  # s6-overlay and Bashio
+  /init rix,
+  /bin/** ix,
+  /usr/bin/** ix,
+  /package/{,**} rix,
+  /command/{,**} rix,
+  /etc/s6/** rix,
+  /etc/s6-overlay/** rix,
+  /run/s6/** rwix,
+  /run/service/** rwix,
+  /etc/services.d/{,**} rix,
+  /etc/cont-init.d/{,**} rix,
+  /etc/cont-finish.d/{,**} rix,
+  /etc/fix-attrs.d/{,**} rix,
+  /usr/lib/bashio/** ix,
+  /run/{,**} rwixk,
+  deny /run/dbus/system_bus_socket rw,
+  deny /var/run/dbus/system_bus_socket rw,
+  /tmp/{,**} rwk,
+  /proc/{,**} r,
+  /dev/tty rw,
+
+  # Ingress and Meshtastic TCP processes have no D-Bus access.
+  /opt/venv/bin/python3 ix,
+  /opt/venv/bin/meshtastic ix,
+  /opt/venv/{,**} rm,
+  /usr/share/meshcore-migration-ota/{,**} r,
+  /data/{,**} rwk,
+
+  # Only this argument-free compiled launcher enters the Bluetooth profile.
+  /usr/local/bin/meshcore-ota-worker cx,
+
+  profile /usr/local/bin/meshcore-ota-worker flags=(attach_disconnected,mediate_deleted) {
+    #include <abstractions/base>
+
+    signal,
+    / r,
+    network unix stream,
+
+    /usr/local/bin/meshcore-ota-worker r,
+    /opt/venv/bin/python3 ix,
+    /usr/bin/python3* ix,
+    /opt/venv/{,**} rm,
+    /usr/share/meshcore-migration-ota/{,**} r,
+    /data/ r,
+    /data/firmware.bin r,
+    /data/destructive-write-attempted rwk,
+    /data/meshcore-ota-worker.sock rwk,
+    /tmp/{,**} rwk,
+    /proc/{,**} r,
+
+    # Bleak uses the host BlueZ daemon only; no raw HCI or device access.
+    /run/dbus/system_bus_socket rw,
+    dbus send
+      bus=system
+      path=/org/freedesktop/DBus
+      interface=org.freedesktop.DBus
+      member={Hello,AddMatch,RemoveMatch,GetNameOwner}
+      peer=(name=org.freedesktop.DBus),
+    dbus send
+      bus=system
+      path=/
+      interface=org.freedesktop.DBus.ObjectManager
+      member=GetManagedObjects
+      peer=(name=org.bluez),
+    dbus send
+      bus=system
+      path=/org/bluez/**
+      interface=org.freedesktop.DBus.Properties
+      member={Get,GetAll}
+      peer=(name=org.bluez),
+    dbus send
+      bus=system
+      path=/org/bluez/**
+      interface=org.bluez.Adapter1
+      member={SetDiscoveryFilter,StartDiscovery,StopDiscovery}
+      peer=(name=org.bluez),
+    dbus send
+      bus=system
+      path=/org/bluez/**
+      interface=org.bluez.Device1
+      member={Connect,Disconnect}
+      peer=(name=org.bluez),
+    dbus send
+      bus=system
+      path=/org/bluez/**
+      interface=org.bluez.GattCharacteristic1
+      member={StartNotify,StopNotify,WriteValue}
+      peer=(name=org.bluez),
+    dbus receive
+      bus=system
+      path=/org/bluez/**
+      peer=(name=org.bluez),
+  }
+}

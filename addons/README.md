@@ -6,6 +6,7 @@ This folder is for custom Home Assistant add-ons.
 
 - Discord Chat GUI
 - Hermes Agent
+- MeshCore Migration OTA
 - OpenClaw Gateway
 - OpenClaw Node
 - Snapchat Chat GUI

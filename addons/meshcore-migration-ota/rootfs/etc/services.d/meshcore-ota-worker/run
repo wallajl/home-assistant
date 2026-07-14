@@ -1,0 +1,7 @@
+#!/usr/bin/with-contenv bashio
+set -euo pipefail
+umask 077
+unset PYTHONPATH PYTHONHOME PYTHONSTARTUP PYTHONINSPECT
+export PYTHONDONTWRITEBYTECODE=1
+
+exec /usr/local/bin/meshcore-ota-worker

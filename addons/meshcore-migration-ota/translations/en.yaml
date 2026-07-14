@@ -1,0 +1,13 @@
+configuration:
+  meshtastic_host:
+    name: Meshtastic host
+    description: Current Meshtastic TCP address used for backup and reboot-to-OTA.
+  meshcore_host:
+    name: Expected MeshCore host
+    description: Address checked after flashing to verify MeshCore is online.
+  meshcore_port:
+    name: MeshCore TCP port
+    description: Companion TCP port expected after migration.
+  expected_firmware_sha256:
+    name: Expected private firmware SHA-256
+    description: Exact digest of the reviewed credential-bearing MeshCore application built privately for this node.

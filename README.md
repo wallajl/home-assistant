@@ -14,6 +14,7 @@ https://github.com/wallajl/home-assistant
 
 - Discord Chat GUI
 - Hermes Agent
+- MeshCore Migration OTA
 - OpenClaw Gateway
 - OpenClaw Node
 - Snapchat Chat GUI

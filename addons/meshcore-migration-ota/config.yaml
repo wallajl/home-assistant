@@ -1,0 +1,32 @@
+name: "MeshCore Migration OTA"
+version: "0.1.0"
+slug: "meshcore_migration_ota"
+description: "One-use experimental Meshtastic-to-MeshCore BLE OTA migration for ESP32-S3 Heltec V3"
+url: "https://github.com/wallajl/home-assistant/tree/main/addons/meshcore-migration-ota"
+arch:
+  - amd64
+homeassistant: "2026.7.2"
+startup: application
+boot: manual_only
+init: false
+tmpfs: true
+stage: experimental
+ingress: true
+ingress_port: 8099
+ingress_entry: /
+ingress_stream: true
+panel_icon: mdi:bluetooth-transfer
+panel_title: MeshCore OTA
+panel_admin: true
+host_dbus: true
+apparmor: true
+options:
+  meshtastic_host: "192.168.0.254"
+  meshcore_host: "192.168.0.181"
+  meshcore_port: 5000
+  expected_firmware_sha256: ""
+schema:
+  meshtastic_host: str
+  meshcore_host: str
+  meshcore_port: port
+  expected_firmware_sha256: match(^$|^[0-9a-fA-F]{64}$)
