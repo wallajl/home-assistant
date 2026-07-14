@@ -32,17 +32,17 @@ This is an application-only cross-flash. It preserves the Meshtastic bootloader,
 4. Confirm the configured hosts. For this installation the add-on reaches the Home Assistant Meshtastic proxy through the Supervisor bridge at `172.30.32.1:4403`; the post-flash MeshCore target remains `192.168.0.181:5000`.
 5. Start the add-on and open its Web UI.
 6. Keep the Home Assistant Meshtastic integration loaded while creating the private backup, because it owns the working local TCP proxy.
-7. Only after the backup succeeds, disable the Meshtastic integration before reboot-to-OTA and BLE discovery.
+7. Keep the Meshtastic integration loaded through **Reboot to OTA and scan** so Prepare can send the reboot command through its TCP proxy. Disable the integration after the BLE helper is detected.
 
 ## Migrate
 
 1. With the Meshtastic integration still loaded, click **Create backup**, wait for `backup ready`, then click **Download private backup**. Store the downloaded YAML somewhere private and confirm it is non-empty.
 2. Select the non-merged MeshCore `.bin` file and click **Validate and stage**.
 3. Review the detected project, byte size and SHA-256 digest.
-4. Disable the Meshtastic integration before preparing/rebooting the node into BLE OTA mode.
-5. Confirm that USB recovery is available and open the add-on log to obtain the one-use arming code.
-6. Click **Reboot to OTA and scan**. This enters the failsafe helper but does not write firmware.
-7. Review the displayed OTA name, exact BLE address, RSSI and staged firmware hash. If needed, move the adapter closer and use **Rescan without reboot**.
+4. Keep the Meshtastic integration loaded and confirm that USB recovery is available.
+5. Click **Reboot to OTA and scan**. Prepare uses the integration's TCP proxy to enter the failsafe helper, then scans locally; it does not write firmware.
+6. After the BLE helper is detected, disable the Meshtastic integration and open the add-on log to obtain the one-use arming code.
+7. Review the displayed OTA name, exact BLE address, RSSI and staged firmware hash. If the node is already in failsafe mode after an add-on restart, use **Rescan without reboot**.
 8. Re-enter the exact scanned BLE address, the displayed confirmation phrase and the one-use arming code.
 9. Click **Flash exact device once**.
 10. Do not stop the add-on, reboot Home Assistant, power-cycle the Heltec, or retry while the phase is `connected`, `flashing` or `verifying`.

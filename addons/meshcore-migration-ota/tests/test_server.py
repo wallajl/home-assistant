@@ -215,6 +215,58 @@ async def test_flash_reserves_operation_before_awaiting_request_body(
     assert app["operation"].pending is False
 
 
+async def test_restores_validated_staged_artifacts_and_allows_rescan(
+    aiohttp_client, options: AddonOptions, monkeypatch
+) -> None:
+    image = make_app_image(project_name="MeshCore")
+    options.data_dir.mkdir(parents=True)
+    (options.data_dir / "firmware.bin").write_bytes(image)
+    options.backup_dir.mkdir(parents=True)
+    backup = options.backup_dir / "meshtastic-backup-20260714T000000000000Z.yaml"
+    backup.write_bytes(b"owner: private\nconfig: retained\nkeys: retained\n")
+
+    gate = asyncio.Event()
+
+    async def blocked_rescan(_app) -> None:
+        await gate.wait()
+
+    monkeypatch.setattr(server_module, "_perform_rescan", blocked_rescan)
+    app = create_app(options)
+    state = app["state"]
+    assert state.phase == "firmware_ready"
+    assert state.firmware_path == options.data_dir / "firmware.bin"
+    assert state.firmware_info.sha256 == options.expected_firmware_sha256
+    assert state.backup_path == backup
+    assert state.firmware_path.stat().st_mode & 0o777 == 0o600
+    assert backup.stat().st_mode & 0o777 == 0o600
+
+    client = await aiohttp_client(app)
+    headers = await csrf_headers(client)
+    response = await client.post("/api/rescan", json={}, headers=headers)
+    assert response.status == 202
+    gate.set()
+    await asyncio.sleep(0)
+
+
+async def test_does_not_restore_persisted_firmware_with_unpinned_hash(
+    options: AddonOptions,
+) -> None:
+    options.data_dir.mkdir(parents=True)
+    (options.data_dir / "firmware.bin").write_bytes(
+        make_app_image(project_name="arduino-lib-builder")
+    )
+    options.backup_dir.mkdir(parents=True)
+    backup = options.backup_dir / "meshtastic-backup-20260714T000000000000Z.yaml"
+    backup.write_bytes(b"owner: private\nconfig: retained\nkeys: retained\n")
+
+    app = create_app(options)
+
+    assert app["state"].firmware_path is None
+    assert app["state"].firmware_info is None
+    assert app["state"].backup_path == backup
+    assert app["state"].phase == "backup_ready"
+
+
 @pytest.mark.parametrize(
     "ingress_path",
     ["//attacker.example/path", "/bad\\path", "/bad?query", "/bad#fragment"],

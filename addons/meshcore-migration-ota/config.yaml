@@ -1,5 +1,5 @@
 name: "MeshCore Migration OTA"
-version: "0.1.1"
+version: "0.1.2"
 slug: "meshcore_migration_ota"
 description: "One-use experimental Meshtastic-to-MeshCore BLE OTA migration for ESP32-S3 Heltec V3"
 url: "https://github.com/wallajl/home-assistant/tree/main/addons/meshcore-migration-ota"

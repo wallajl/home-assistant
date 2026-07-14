@@ -9,7 +9,7 @@ This is an unsupported cross-firmware migration. Use the normal USB full-flash p
 - Keep a USB data cable and a computer ready for recovery.
 - The Home Assistant machine's local Bluetooth adapter must be within range of the Heltec V3.
 - Back up through the working Meshtastic TCP endpoint first. On this Home Assistant installation the add-on reaches that local proxy through the Supervisor bridge at `172.30.32.1:4403`; it exists only while the Meshtastic integration is loaded.
-- After the private backup succeeds, temporarily disable the Home Assistant Meshtastic integration before rebooting the radio into BLE OTA mode.
+- Keep the Home Assistant Meshtastic integration loaded through **Reboot to OTA and scan**, because Prepare sends the reboot command through its TCP proxy. Disable the integration after that command succeeds and the BLE helper is detected.
 - Never upload a merged/full-flash image. The add-on rejects bootloader and merged images.
 - A BLE disconnect after flash writing begins can leave the application slot incomplete and require USB recovery.
 - Do not power-cycle the radio during transfer.

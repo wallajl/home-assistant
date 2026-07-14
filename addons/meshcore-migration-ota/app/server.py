@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import secrets
 import socket
+import stat
 import time
 from typing import Any, Callable
 
@@ -26,6 +27,7 @@ from .firmware import MAX_APP_SIZE, FirmwareValidationError, validate_meshcore_f
 WORKER_SOCKET = Path("/data/meshcore-ota-worker.sock")
 RESULT_PATH_NAME = "migration-result.json"
 USED_MARKER_NAME = "destructive-write-attempted"
+MAX_BACKUP_SIZE = 10 * 1024 * 1024
 MESHTASTIC_CLI = "/opt/venv/bin/meshtastic"
 ALLOWED_PEERS = {"127.0.0.1", "::1", "172.30.32.2"}
 
@@ -44,7 +46,7 @@ class AddonOptions:
     def load(cls, path: Path = Path("/data/options.json")) -> "AddonOptions":
         raw = json.loads(path.read_text(encoding="utf-8"))
         return cls(
-            meshtastic_host=str(raw.get("meshtastic_host", "192.168.0.181")),
+            meshtastic_host=str(raw.get("meshtastic_host", "172.30.32.1")),
             meshcore_host=str(raw.get("meshcore_host", "192.168.0.181")),
             meshcore_port=int(raw.get("meshcore_port", 5000)),
             expected_firmware_sha256=str(raw.get("expected_firmware_sha256", ""))
@@ -139,6 +141,65 @@ def _fsync_directory(path: Path) -> None:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
+
+
+def _read_private_regular_file(path: Path, maximum_size: int) -> bytes:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise OSError(f"Private artifact is not a regular file: {path.name}")
+        if metadata.st_size < 32 or metadata.st_size > maximum_size:
+            raise OSError(f"Private artifact has an invalid size: {path.name}")
+        os.fchmod(descriptor, 0o600)
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, min(remaining, 64 * 1024))
+            if not chunk:
+                raise OSError(f"Private artifact was truncated: {path.name}")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _restore_staged_artifacts(options: AddonOptions, state: MigrationState) -> None:
+    firmware_path = options.data_dir / "firmware.bin"
+    try:
+        firmware_data = _read_private_regular_file(firmware_path, MAX_APP_SIZE)
+        firmware_info = validate_meshcore_firmware(firmware_data)
+        if len(options.expected_firmware_sha256) != 64 or not hmac.compare_digest(
+            firmware_info.sha256, options.expected_firmware_sha256
+        ):
+            raise FirmwareValidationError(
+                "Persisted firmware does not match the pinned SHA-256"
+            )
+        state.firmware_path = firmware_path
+        state.firmware_info = firmware_info
+    except (OSError, FirmwareValidationError):
+        pass
+
+    if options.backup_dir.is_dir():
+        for candidate in sorted(
+            options.backup_dir.glob("meshtastic-backup-*.yaml"), reverse=True
+        ):
+            try:
+                _read_private_regular_file(candidate, MAX_BACKUP_SIZE)
+            except OSError:
+                continue
+            state.backup_path = candidate
+            break
+
+    if state.firmware_path and state.backup_path:
+        state.phase = "firmware_ready"
+        state.record(
+            "Restored validated firmware and private backup from add-on storage"
+        )
+    elif state.backup_path:
+        state.phase = "backup_ready"
+        state.record("Restored private Meshtastic backup from add-on storage")
 
 
 def _atomic_private_write(destination: Path, data: bytes) -> None:
@@ -580,8 +641,10 @@ async def _prepare(request: web.Request) -> web.Response:
 async def _rescan(request: web.Request) -> web.Response:
     state: MigrationState = request.app["state"]
     require_staged_preconditions(state)
-    if state.phase not in {"waiting_for_ble", "armed"}:
-        raise PreflightError("Reboot to failsafe OTA mode before rescanning")
+    if state.phase not in {"firmware_ready", "waiting_for_ble", "armed", "failed"}:
+        raise PreflightError(
+            "Stage firmware and backup before scanning failsafe OTA mode"
+        )
     _reserve_operation(request.app)
     try:
         _spawn(request.app, _perform_rescan(request.app))
@@ -649,6 +712,8 @@ def create_app(
             "state"
         ].error = "A previous migration attempt is recorded. This instance is permanently disarmed; inspect the result and reinstall only after physical recovery assessment."
         app["state"].record(app["state"].error)
+    else:
+        _restore_staged_artifacts(options, app["state"])
 
     app.router.add_get("/", _index)
     app.router.add_get("/health", _health)
@@ -684,7 +749,7 @@ INDEX_HTML = r"""<!doctype html>
 <div class="tag">Experimental • one-use recovery tool</div><h1>Meshtastic → MeshCore</h1><p class="muted">Cableless Heltec V3 application migration using the Home Assistant machine's local Bluetooth adapter.</p>
 <div class="warn"><strong>Unsupported destructive operation.</strong> A BLE disconnect after writing starts can leave the application slot incomplete. Keep USB recovery hardware available. Never power-cycle or retry after a partial transfer.</div>
 <section class="grid">
-<div class="card"><div class="step">STEP 1</div><h2>Private backup</h2><p class="muted">Keep the Meshtastic integration loaded while backing up through this installation's local TCP proxy. Download the backup and keep it private. Disable Meshtastic only after backup, before STEP 3.</p><button id="backup" class="secondary">Create backup</button><button id="downloadBackup" class="secondary" disabled>Download private backup</button></div>
+<div class="card"><div class="step">STEP 1</div><h2>Private backup</h2><p class="muted">Keep the Meshtastic integration loaded while backing up through this installation's local TCP proxy. Download the backup and keep it private. Leave Meshtastic loaded through STEP 3 so Prepare can send reboot-to-OTA.</p><button id="backup" class="secondary">Create backup</button><button id="downloadBackup" class="secondary" disabled>Download private backup</button></div>
 <div class="card"><div class="step">STEP 2</div><h2>Validated MeshCore app</h2><p class="muted">Choose the non-merged Heltec V3 application binary. Full/merged images are rejected.</p><label>MeshCore application binary<input id="firmware" type="file" accept=".bin,application/octet-stream"></label><button id="upload">Validate and stage</button></div>
 <div class="card"><div class="step">STEP 3</div><h2>Prepare and identify</h2><p class="muted">Reboot to failsafe OTA, scan, and display exact BLE identities. This stage does not write firmware.</p><button id="prepare" class="secondary">Reboot to OTA and scan</button><button id="rescan" class="secondary">Rescan without reboot</button><div id="devices"></div></div>
 <div class="card"><div class="step">STEP 4</div><h2>One destructive write</h2><p class="muted">Re-enter the exact scanned BLE address, phrase, and one-use code printed in the add-on log.</p><label>BLE address<input id="bleAddress" type="text" autocomplete="off"></label><label>Confirmation phrase <code id="phrase"></code><input id="confirmation" type="text" autocomplete="off" placeholder="Exact phrase"></label><label>One-use arming code<input id="armingCode" type="text" autocomplete="off" placeholder="Arming code from add-on log"></label><button id="flash" class="danger">Flash exact device once</button></div>
